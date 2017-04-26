@@ -1,7 +1,5 @@
 .PHONY: all
 
-all: bin/krc_operator
-
-bin/krc_operator: *.go
+all:
 	go install
-	go build -o $@ $<
+	go build -o bin/krc_operator
