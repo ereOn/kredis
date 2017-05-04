@@ -1,8 +1,11 @@
-.PHONY: all glide-update
+.PHONY: all build glide-update
 
-all:
-	make -C pkg
-	make -C cmd
+all: build
+
+build: bin/operator
+
+bin/operator: operator/*.go tpr/*.go
+	go build -o $@ ./operator
 
 glide-update:
 	glide update -v
