@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"time"
 
 	"github.com/ereOn/k8s-redis-cluster-operator/tpr"
 	"github.com/spf13/cobra"
@@ -14,9 +15,11 @@ import (
 	"k8s.io/client-go/pkg/api/unversioned"
 	"k8s.io/client-go/pkg/api/v1"
 	"k8s.io/client-go/pkg/apis/extensions/v1beta1"
+	"k8s.io/client-go/pkg/fields"
 	"k8s.io/client-go/pkg/runtime"
 	"k8s.io/client-go/pkg/runtime/serializer"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
 )
 
@@ -40,11 +43,11 @@ var RootCmd = &cobra.Command{
 			return err
 		}
 
-		//tprclient, err := buildClientFromFlags(config)
+		tprclient, err := buildClientFromFlags(config)
 
-		//if err != nil {
-		//	return err
-		//}
+		if err != nil {
+			return err
+		}
 
 		clientset, err := kubernetes.NewForConfig(config)
 
@@ -58,6 +61,8 @@ var RootCmd = &cobra.Command{
 			return err
 		}
 
+		process(tprclient)
+
 		terminated := make(chan os.Signal, 1)
 		defer close(terminated)
 		signal.Notify(terminated, os.Interrupt)
@@ -65,6 +70,30 @@ var RootCmd = &cobra.Command{
 
 		return nil
 	},
+}
+
+func process(client *rest.RESTClient) {
+	source := cache.NewListWatchFromClient(client, "redisclusters", api.NamespaceAll, fields.Everything())
+
+	_, controller := cache.NewInformer(
+		source,
+		&tpr.RedisCluster{},
+		time.Second*10,
+		cache.ResourceEventHandlerFuncs{
+			AddFunc: func(new interface{}) {
+				fmt.Println("add", new)
+			},
+			UpdateFunc: func(old interface{}, new interface{}) {
+				fmt.Println("update", old, new)
+			},
+			DeleteFunc: func(old interface{}) {
+				fmt.Println("delete", old)
+			},
+		},
+	)
+
+	stopchan := make(chan struct{})
+	go controller.Run(stopchan)
 }
 
 func main() {
@@ -102,6 +131,7 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		unversioned.GroupVersion{Group: "freelan.org", Version: "v1"},
 		&tpr.RedisCluster{},
 		&tpr.RedisClusterList{},
+		&api.ListOptions{},
 	)
 
 	return nil
