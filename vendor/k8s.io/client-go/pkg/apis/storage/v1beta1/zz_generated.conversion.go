@@ -21,9 +21,9 @@ limitations under the License.
 package v1beta1
 
 import (
-	conversion "k8s.io/apimachinery/pkg/conversion"
-	runtime "k8s.io/apimachinery/pkg/runtime"
 	storage "k8s.io/client-go/pkg/apis/storage"
+	conversion "k8s.io/client-go/pkg/conversion"
+	runtime "k8s.io/client-go/pkg/runtime"
 	unsafe "unsafe"
 )
 
@@ -43,7 +43,10 @@ func RegisterConversions(scheme *runtime.Scheme) error {
 }
 
 func autoConvert_v1beta1_StorageClass_To_storage_StorageClass(in *StorageClass, out *storage.StorageClass, s conversion.Scope) error {
-	out.ObjectMeta = in.ObjectMeta
+	// TODO: Inefficient conversion - can we improve it?
+	if err := s.Convert(&in.ObjectMeta, &out.ObjectMeta, 0); err != nil {
+		return err
+	}
 	out.Provisioner = in.Provisioner
 	out.Parameters = *(*map[string]string)(unsafe.Pointer(&in.Parameters))
 	return nil
@@ -54,7 +57,10 @@ func Convert_v1beta1_StorageClass_To_storage_StorageClass(in *StorageClass, out 
 }
 
 func autoConvert_storage_StorageClass_To_v1beta1_StorageClass(in *storage.StorageClass, out *StorageClass, s conversion.Scope) error {
-	out.ObjectMeta = in.ObjectMeta
+	// TODO: Inefficient conversion - can we improve it?
+	if err := s.Convert(&in.ObjectMeta, &out.ObjectMeta, 0); err != nil {
+		return err
+	}
 	out.Provisioner = in.Provisioner
 	out.Parameters = *(*map[string]string)(unsafe.Pointer(&in.Parameters))
 	return nil
@@ -76,11 +82,7 @@ func Convert_v1beta1_StorageClassList_To_storage_StorageClassList(in *StorageCla
 
 func autoConvert_storage_StorageClassList_To_v1beta1_StorageClassList(in *storage.StorageClassList, out *StorageClassList, s conversion.Scope) error {
 	out.ListMeta = in.ListMeta
-	if in.Items == nil {
-		out.Items = make([]StorageClass, 0)
-	} else {
-		out.Items = *(*[]StorageClass)(unsafe.Pointer(&in.Items))
-	}
+	out.Items = *(*[]StorageClass)(unsafe.Pointer(&in.Items))
 	return nil
 }
 

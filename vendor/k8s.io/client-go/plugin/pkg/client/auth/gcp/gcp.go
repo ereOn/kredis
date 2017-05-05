@@ -30,19 +30,16 @@ import (
 	"golang.org/x/net/context"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
-	"k8s.io/apimachinery/pkg/util/yaml"
-	restclient "k8s.io/client-go/rest"
-	"k8s.io/client-go/util/jsonpath"
+	"k8s.io/client-go/pkg/util/jsonpath"
+	"k8s.io/client-go/pkg/util/yaml"
+	"k8s.io/client-go/rest"
 )
 
 func init() {
-	if err := restclient.RegisterAuthProviderPlugin("gcp", newGCPAuthProvider); err != nil {
+	if err := rest.RegisterAuthProviderPlugin("gcp", newGCPAuthProvider); err != nil {
 		glog.Fatalf("Failed to register gcp auth plugin: %v", err)
 	}
 }
-
-// Stubbable for testing
-var execCommand = exec.Command
 
 // gcpAuthProvider is an auth provider plugin that uses GCP credentials to provide
 // tokens for kubectl to authenticate itself to the apiserver. A sample json config
@@ -65,13 +62,10 @@ var execCommand = exec.Command
 //       # These options direct the plugin to execute a specified command and parse
 //       # token and expiry time from the output of the command.
 //
-//       # Command to execute for access token. Command output will be parsed as JSON.
-//       # If "cmd-args" is not present, this value will be split on whitespace, with
-//       # the first element interpreted as the command, remaining elements as args.
-//       "cmd-path": "/usr/bin/gcloud",
-//
-//       # Arguments to pass to command to execute for access token.
-//       "cmd-args": "config config-helper --output=json"
+//       # Command to execute for access token. String is split on whitespace
+//       # with first field treated as the executable, remaining fields as args.
+//       # Command output will be parsed as JSON.
+//       "cmd-path": "/usr/bin/gcloud config config-helper --output=json",
 //
 //       # JSONPath to the string field that represents the access token in
 //       # command output. If omitted, defaults to "{.access_token}".
@@ -91,25 +85,15 @@ var execCommand = exec.Command
 //
 type gcpAuthProvider struct {
 	tokenSource oauth2.TokenSource
-	persister   restclient.AuthProviderConfigPersister
+	persister   rest.AuthProviderConfigPersister
 }
 
-func newGCPAuthProvider(_ string, gcpConfig map[string]string, persister restclient.AuthProviderConfigPersister) (restclient.AuthProvider, error) {
+func newGCPAuthProvider(_ string, gcpConfig map[string]string, persister rest.AuthProviderConfigPersister) (rest.AuthProvider, error) {
+	cmd, useCmd := gcpConfig["cmd-path"]
 	var ts oauth2.TokenSource
 	var err error
-	if cmd, useCmd := gcpConfig["cmd-path"]; useCmd {
-		if len(cmd) == 0 {
-			return nil, fmt.Errorf("missing access token cmd")
-		}
-		var args []string
-		if cmdArgs, ok := gcpConfig["cmd-args"]; ok {
-			args = strings.Fields(cmdArgs)
-		} else {
-			fields := strings.Fields(cmd)
-			cmd = fields[0]
-			args = fields[1:]
-		}
-		ts = newCmdTokenSource(cmd, args, gcpConfig["token-key"], gcpConfig["expiry-key"], gcpConfig["time-fmt"])
+	if useCmd {
+		ts, err = newCmdTokenSource(cmd, gcpConfig["token-key"], gcpConfig["expiry-key"], gcpConfig["time-fmt"])
 	} else {
 		ts, err = google.DefaultTokenSource(context.Background(), "https://www.googleapis.com/auth/cloud-platform")
 	}
@@ -137,11 +121,11 @@ type cachedTokenSource struct {
 	source      oauth2.TokenSource
 	accessToken string
 	expiry      time.Time
-	persister   restclient.AuthProviderConfigPersister
+	persister   rest.AuthProviderConfigPersister
 	cache       map[string]string
 }
 
-func newCachedTokenSource(accessToken, expiry string, persister restclient.AuthProviderConfigPersister, ts oauth2.TokenSource, cache map[string]string) (*cachedTokenSource, error) {
+func newCachedTokenSource(accessToken, expiry string, persister rest.AuthProviderConfigPersister, ts oauth2.TokenSource, cache map[string]string) (*cachedTokenSource, error) {
 	var expiryTime time.Time
 	if parsedTime, err := time.Parse(time.RFC3339Nano, expiry); err == nil {
 		expiryTime = parsedTime
@@ -208,7 +192,7 @@ type commandTokenSource struct {
 	timeFmt   string
 }
 
-func newCmdTokenSource(cmd string, args []string, tokenKey, expiryKey, timeFmt string) *commandTokenSource {
+func newCmdTokenSource(cmd, tokenKey, expiryKey, timeFmt string) (*commandTokenSource, error) {
 	if len(timeFmt) == 0 {
 		timeFmt = time.RFC3339Nano
 	}
@@ -218,21 +202,25 @@ func newCmdTokenSource(cmd string, args []string, tokenKey, expiryKey, timeFmt s
 	if len(expiryKey) == 0 {
 		expiryKey = "{.token_expiry}"
 	}
+	fields := strings.Fields(cmd)
+	if len(fields) == 0 {
+		return nil, fmt.Errorf("missing access token cmd")
+	}
 	return &commandTokenSource{
-		cmd:       cmd,
-		args:      args,
+		cmd:       fields[0],
+		args:      fields[1:],
 		tokenKey:  tokenKey,
 		expiryKey: expiryKey,
 		timeFmt:   timeFmt,
-	}
+	}, nil
 }
 
 func (c *commandTokenSource) Token() (*oauth2.Token, error) {
-	fullCmd := strings.Join(append([]string{c.cmd}, c.args...), " ")
-	cmd := execCommand(c.cmd, c.args...)
+	fullCmd := fmt.Sprintf("%s %s", c.cmd, strings.Join(c.args, " "))
+	cmd := exec.Command(c.cmd, c.args...)
 	output, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("error executing access token command %q: err=%v output=%s", fullCmd, err, output)
+		return nil, fmt.Errorf("error executing access token command %q: %v", fullCmd, err)
 	}
 	token, err := c.parseTokenCmdOutput(output)
 	if err != nil {
@@ -253,11 +241,11 @@ func (c *commandTokenSource) parseTokenCmdOutput(output []byte) (*oauth2.Token, 
 
 	accessToken, err := parseJSONPath(data, "token-key", c.tokenKey)
 	if err != nil {
-		return nil, fmt.Errorf("error parsing token-key %q from %q: %v", c.tokenKey, string(output), err)
+		return nil, fmt.Errorf("error parsing token-key %q: %v", c.tokenKey, err)
 	}
 	expiryStr, err := parseJSONPath(data, "expiry-key", c.expiryKey)
 	if err != nil {
-		return nil, fmt.Errorf("error parsing expiry-key %q from %q: %v", c.expiryKey, string(output), err)
+		return nil, fmt.Errorf("error parsing expiry-key %q: %v", c.expiryKey, err)
 	}
 	var expiry time.Time
 	if t, err := time.Parse(c.timeFmt, expiryStr); err != nil {

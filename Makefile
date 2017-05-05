@@ -2,10 +2,8 @@
 
 all: build
 
-build: bin/operator
-
-bin/operator: operator/*.go tpr/*.go
-	go build -o $@ ./operator
+build:
+	go install ./cmd/redis-cluster-operator
 
 glide-update:
 	glide update -v

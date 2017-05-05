@@ -17,11 +17,10 @@ limitations under the License.
 package v1beta1
 
 import (
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	types "k8s.io/apimachinery/pkg/types"
-	watch "k8s.io/apimachinery/pkg/watch"
-	scheme "k8s.io/client-go/kubernetes/scheme"
+	api "k8s.io/client-go/pkg/api"
+	v1 "k8s.io/client-go/pkg/api/v1"
 	v1beta1 "k8s.io/client-go/pkg/apis/extensions/v1beta1"
+	watch "k8s.io/client-go/pkg/watch"
 	rest "k8s.io/client-go/rest"
 )
 
@@ -38,10 +37,10 @@ type DeploymentInterface interface {
 	UpdateStatus(*v1beta1.Deployment) (*v1beta1.Deployment, error)
 	Delete(name string, options *v1.DeleteOptions) error
 	DeleteCollection(options *v1.DeleteOptions, listOptions v1.ListOptions) error
-	Get(name string, options v1.GetOptions) (*v1beta1.Deployment, error)
+	Get(name string) (*v1beta1.Deployment, error)
 	List(opts v1.ListOptions) (*v1beta1.DeploymentList, error)
 	Watch(opts v1.ListOptions) (watch.Interface, error)
-	Patch(name string, pt types.PatchType, data []byte, subresources ...string) (result *v1beta1.Deployment, err error)
+	Patch(name string, pt api.PatchType, data []byte, subresources ...string) (result *v1beta1.Deployment, err error)
 	DeploymentExpansion
 }
 
@@ -84,9 +83,6 @@ func (c *deployments) Update(deployment *v1beta1.Deployment) (result *v1beta1.De
 	return
 }
 
-// UpdateStatus was generated because the type contains a Status member.
-// Add a +genclientstatus=false comment above the type to avoid generating UpdateStatus().
-
 func (c *deployments) UpdateStatus(deployment *v1beta1.Deployment) (result *v1beta1.Deployment, err error) {
 	result = &v1beta1.Deployment{}
 	err = c.client.Put().
@@ -116,20 +112,19 @@ func (c *deployments) DeleteCollection(options *v1.DeleteOptions, listOptions v1
 	return c.client.Delete().
 		Namespace(c.ns).
 		Resource("deployments").
-		VersionedParams(&listOptions, scheme.ParameterCodec).
+		VersionedParams(&listOptions, api.ParameterCodec).
 		Body(options).
 		Do().
 		Error()
 }
 
 // Get takes name of the deployment, and returns the corresponding deployment object, and an error if there is any.
-func (c *deployments) Get(name string, options v1.GetOptions) (result *v1beta1.Deployment, err error) {
+func (c *deployments) Get(name string) (result *v1beta1.Deployment, err error) {
 	result = &v1beta1.Deployment{}
 	err = c.client.Get().
 		Namespace(c.ns).
 		Resource("deployments").
 		Name(name).
-		VersionedParams(&options, scheme.ParameterCodec).
 		Do().
 		Into(result)
 	return
@@ -141,7 +136,7 @@ func (c *deployments) List(opts v1.ListOptions) (result *v1beta1.DeploymentList,
 	err = c.client.Get().
 		Namespace(c.ns).
 		Resource("deployments").
-		VersionedParams(&opts, scheme.ParameterCodec).
+		VersionedParams(&opts, api.ParameterCodec).
 		Do().
 		Into(result)
 	return
@@ -149,16 +144,16 @@ func (c *deployments) List(opts v1.ListOptions) (result *v1beta1.DeploymentList,
 
 // Watch returns a watch.Interface that watches the requested deployments.
 func (c *deployments) Watch(opts v1.ListOptions) (watch.Interface, error) {
-	opts.Watch = true
 	return c.client.Get().
+		Prefix("watch").
 		Namespace(c.ns).
 		Resource("deployments").
-		VersionedParams(&opts, scheme.ParameterCodec).
+		VersionedParams(&opts, api.ParameterCodec).
 		Watch()
 }
 
 // Patch applies the patch and returns the patched deployment.
-func (c *deployments) Patch(name string, pt types.PatchType, data []byte, subresources ...string) (result *v1beta1.Deployment, err error) {
+func (c *deployments) Patch(name string, pt api.PatchType, data []byte, subresources ...string) (result *v1beta1.Deployment, err error) {
 	result = &v1beta1.Deployment{}
 	err = c.client.Patch(pt).
 		Namespace(c.ns).
