@@ -43,28 +43,31 @@ func (rcl *RedisClusterList) GetListMeta() unversioned.List {
 	return &rcl.Metadata
 }
 
+type RedisClusterCopy RedisCluster
+type RedisClusterListCopy RedisClusterList
+
 func (rc *RedisCluster) UnmarshalJSON(data []byte) error {
-	value := RedisCluster{}
+	value := RedisClusterCopy{}
 	err := json.Unmarshal(data, &value)
 
 	if err != nil {
 		return err
 	}
 
-	*rc = value
+	*rc = RedisCluster(value)
 
 	return nil
 }
 
 func (rcl *RedisClusterList) UnmarshalJSON(data []byte) error {
-	value := RedisClusterList{}
+	value := RedisClusterListCopy{}
 	err := json.Unmarshal(data, &value)
 
 	if err != nil {
 		return err
 	}
 
-	*rcl = value
+	*rcl = RedisClusterList(value)
 
 	return nil
 }
