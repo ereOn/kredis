@@ -6,6 +6,7 @@ import (
 	"os/signal"
 
 	"github.com/ereOn/k8s-redis-cluster-operator/k8s"
+	"github.com/go-kit/kit/log"
 	"github.com/spf13/cobra"
 )
 
@@ -35,7 +36,8 @@ var RootCmd = &cobra.Command{
 			return err
 		}
 
-		clientset, err := k8s.NewForConfig(config)
+		logger := log.NewLogfmtLogger(log.NewSyncWriter(os.Stderr))
+		clientset, err := k8s.NewForConfig(logger, config)
 
 		if err != nil {
 			return err
@@ -48,6 +50,9 @@ var RootCmd = &cobra.Command{
 		}
 
 		defer clientset.Close()
+		defer logger.Log("event", "watch ended")
+
+		logger.Log("event", "watch started")
 		go clientset.Watch()
 
 		waitInterrupt()
