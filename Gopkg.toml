@@ -24,3 +24,11 @@
 [[constraint]]
   branch = "master"
   name = "github.com/spf13/cobra"
+
+[[constraint]]
+  name = "k8s.io/client-go"
+  version = "v3.0.0"
+
+[[override]]
+  name = "k8s.io/apimachinery"
+  revision = "85ace5365f33b16fc735c866a12e3c765b9700f2"

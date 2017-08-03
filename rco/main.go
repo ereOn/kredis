@@ -5,6 +5,9 @@ import (
 	"os/signal"
 	"syscall"
 
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
+
 	"github.com/go-kit/kit/log"
 	"github.com/spf13/cobra"
 )
@@ -25,6 +28,12 @@ var rootCmd = &cobra.Command{
 	Short: "An operator that operates Redis clusters.",
 	Long:  "An operator that operates Redis clusters.",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		config, err := buildConfig(kubeconfig)
+
+		if err != nil {
+			return err
+		}
+
 		logger := log.NewLogfmtLogger(log.NewSyncWriter(os.Stderr))
 		logger.Log("event", "watch started")
 		defer logger.Log("event", "watch ended")
@@ -33,6 +42,13 @@ var rootCmd = &cobra.Command{
 
 		return nil
 	},
+}
+
+func buildConfig(kubeconfig string) (*rest.Config, error) {
+	if kubeconfig != "" {
+		return clientcmd.BuildConfigFromFlags("", kubeconfig)
+	}
+	return rest.InClusterConfig()
 }
 
 func init() {
