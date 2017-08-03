@@ -1,9 +1,9 @@
-.PHONY: all build glide-update
+.PHONY: all build update-vendor
 
 all: build
 
 build:
-	go install ./cmd/redis-cluster-operator
+	go build -o bin/rco ./rco
 
-glide-update:
-	glide update -v
+update-vendor:
+	dep ensure -update
