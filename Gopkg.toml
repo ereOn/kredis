@@ -27,12 +27,8 @@
 
 [[constraint]]
   name = "k8s.io/client-go"
-  version = "v3.0.0"
+  revision = "45673e060eb921b510677b1123737ad1158e49fa"
 
 [[override]]
   name = "k8s.io/apimachinery"
-  revision = "85ace5365f33b16fc735c866a12e3c765b9700f2"
-
-[[override]]
-  name = "github.com/emicklei/go-restful"
-  version = "1.2"
+  revision = "dc1f89aff9a7509782bde3b68824c8043a3e58cc"
