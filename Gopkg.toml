@@ -32,3 +32,7 @@
 [[override]]
   name = "k8s.io/apimachinery"
   revision = "85ace5365f33b16fc735c866a12e3c765b9700f2"
+
+[[override]]
+  name = "github.com/emicklei/go-restful"
+  version = "1.2"
