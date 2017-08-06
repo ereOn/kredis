@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/ereOn/k8s-redis-cluster-operator/client"
 	"github.com/ereOn/k8s-redis-cluster-operator/crd"
+	"github.com/ereOn/k8s-redis-cluster-operator/operator"
 	"github.com/go-kit/kit/log"
 	"github.com/spf13/cobra"
 )
@@ -28,11 +30,23 @@ var (
 	slaves     = 1
 )
 
-func waitInterrupt() {
-	terminated := make(chan os.Signal, 1)
-	defer close(terminated)
-	signal.Notify(terminated, os.Interrupt, syscall.SIGTERM)
-	<-terminated
+// WithCancelOnInterupt returns a context that expires when an interruption occurs.
+func WithCancelOnInterupt(ctx context.Context) (context.Context, func()) {
+	ctx, cancel := context.WithCancel(ctx)
+
+	go func() {
+		defer cancel()
+
+		terminated := make(chan os.Signal, 1)
+		defer close(terminated)
+
+		signal.Notify(terminated, os.Interrupt, syscall.SIGTERM)
+		defer signal.Reset(os.Interrupt, syscall.SIGTERM)
+
+		<-terminated
+	}()
+
+	return ctx, cancel
 }
 
 func buildConfig(kubeconfig string) (*rest.Config, error) {
@@ -153,24 +167,16 @@ var manageCmd = &cobra.Command{
 	Short:        "Manage the Redis cluster resource definitions in the Kubernetes cluster.",
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		redisClusters := crd.RedisClusterList{}
-		err := redisClusterClient.Get().Resource(crd.RedisClusterDefinitionName).Do().Into(&redisClusters)
-
-		if err != nil {
-			return err
-		}
-
-		for _, redisCluster := range redisClusters.Items {
-			fmt.Println(redisCluster.Name, redisCluster.Spec.Instances, redisCluster.Spec.Slaves)
-		}
+		ctx, cancel := WithCancelOnInterupt(context.Background())
+		defer cancel()
 
 		logger := log.NewLogfmtLogger(log.NewSyncWriter(os.Stderr))
-		logger.Log("event", "watch started")
-		defer logger.Log("event", "watch ended")
+		operator := operator.New(redisClusterClient, logger)
 
-		waitInterrupt()
+		logger.Log("event", "operator running")
+		defer logger.Log("event", "operator stopped")
 
-		return nil
+		return operator.Run(ctx)
 	},
 }
 
