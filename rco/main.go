@@ -1,16 +1,19 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
 
 	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
+	"k8s.io/apimachinery/pkg/runtime"
 
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
+	"github.com/ereOn/k8s-redis-cluster-operator/client"
 	"github.com/ereOn/k8s-redis-cluster-operator/crd"
 	"github.com/go-kit/kit/log"
 	"github.com/spf13/cobra"
@@ -38,6 +41,8 @@ func buildConfig(kubeconfig string) (*rest.Config, error) {
 }
 
 var clientset *apiextensionsclient.Clientset
+var redisClusterClient *rest.RESTClient
+var redisClusterScheme *runtime.Scheme
 
 var rootCmd = &cobra.Command{
 	Use:   "rco",
@@ -50,6 +55,12 @@ var rootCmd = &cobra.Command{
 		}
 
 		clientset, err = apiextensionsclient.NewForConfig(config)
+
+		if err != nil {
+			return err
+		}
+
+		redisClusterClient, redisClusterScheme, err = client.New(config)
 
 		if err != nil {
 			return err
@@ -80,10 +91,21 @@ var unregisterCmd = &cobra.Command{
 }
 
 var manageCmd = &cobra.Command{
-	Use:          "manager",
+	Use:          "manage",
 	Short:        "Manage the Redis cluster resource definitions in the Kubernetes cluster.",
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		redisClusters := crd.RedisClusterList{}
+		err := redisClusterClient.Get().Resource(crd.RedisClusterDefinitionName).Do().Into(&redisClusters)
+
+		if err != nil {
+			return err
+		}
+
+		for _, redisCluster := range redisClusters.Items {
+			fmt.Println(redisCluster.Name, redisCluster.Spec.Instances, redisCluster.Spec.Slaves)
+		}
+
 		logger := log.NewLogfmtLogger(log.NewSyncWriter(os.Stderr))
 		logger.Log("event", "watch started")
 		defer logger.Log("event", "watch ended")

@@ -16,7 +16,16 @@ const (
 	RedisClusterDefinitionNameSingular = "rediscluster"
 	// RedisClusterDefinitionGroup is the group of the Redis clusters CRD.
 	RedisClusterDefinitionGroup = "freelan.org"
+	// RedisClusterDefinitionVersion is the version of the resource.
+	RedisClusterDefinitionVersion = "v1"
 )
+
+// RedisClusterList represents a list of Redis clusters.
+type RedisClusterList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata"`
+	Items           []RedisCluster `json:"items"`
+}
 
 // RedisCluster represents a Redis cluster.
 type RedisCluster struct {
@@ -48,7 +57,7 @@ var RedisClusterCRD = &apiextensionsv1beta1.CustomResourceDefinition{
 	},
 	Spec: apiextensionsv1beta1.CustomResourceDefinitionSpec{
 		Group:   RedisClusterDefinitionGroup,
-		Version: "v1",
+		Version: RedisClusterDefinitionVersion,
 		Scope:   apiextensionsv1beta1.NamespaceScoped,
 		Names: apiextensionsv1beta1.CustomResourceDefinitionNames{
 			Plural:   RedisClusterDefinitionName,
