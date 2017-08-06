@@ -1,0 +1,7 @@
+apiVersion: freelan.org/v1
+kind: RedisCluster
+metadata:
+  name: cluster-6-1
+spec:
+  instances: 6
+  slaves: 1

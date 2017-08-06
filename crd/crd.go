@@ -3,7 +3,6 @@ package crd
 import (
 	"reflect"
 
-	crv1 "k8s.io/apiextensions-apiserver/examples/client-go/apis/cr/v1"
 	apiextensionsv1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
 	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 
@@ -12,7 +11,9 @@ import (
 
 const (
 	// RedisClusterDefinitionName is the name of the Redis clusters CRD.
-	RedisClusterDefinitionName = "redis-clusters"
+	RedisClusterDefinitionName = "redisclusters"
+	// RedisClusterDefinitionNameSingular is the singular name of the Redis clusters CRD.
+	RedisClusterDefinitionNameSingular = "rediscluster"
 	// RedisClusterDefinitionGroup is the group of the Redis clusters CRD.
 	RedisClusterDefinitionGroup = "freelan.org"
 )
@@ -27,8 +28,8 @@ type RedisCluster struct {
 
 // RedisClusterSpec is the specification for Redis clusters.
 type RedisClusterSpec struct {
-	Foo string `json:"foo"`
-	Bar bool   `json:"bar"`
+	Instances uint `json:"instances"`
+	Slaves    uint `json:"slaves"`
 }
 
 // RedisClusterStatus describes the status of a Redis cluster.
@@ -47,11 +48,12 @@ var RedisClusterCRD = &apiextensionsv1beta1.CustomResourceDefinition{
 	},
 	Spec: apiextensionsv1beta1.CustomResourceDefinitionSpec{
 		Group:   RedisClusterDefinitionGroup,
-		Version: crv1.SchemeGroupVersion.Version,
+		Version: "v1",
 		Scope:   apiextensionsv1beta1.NamespaceScoped,
 		Names: apiextensionsv1beta1.CustomResourceDefinitionNames{
-			Plural: RedisClusterDefinitionName,
-			Kind:   reflect.TypeOf(RedisCluster{}).Name(),
+			Plural:   RedisClusterDefinitionName,
+			Singular: RedisClusterDefinitionNameSingular,
+			Kind:     reflect.TypeOf(RedisCluster{}).Name(),
 		},
 	},
 }
