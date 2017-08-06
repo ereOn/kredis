@@ -176,7 +176,9 @@ var manageCmd = &cobra.Command{
 		logger.Log("event", "operator running")
 		defer logger.Log("event", "operator stopped")
 
-		return operator.Run(ctx)
+		operator.Run(ctx)
+
+		return nil
 	},
 }
 
