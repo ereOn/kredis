@@ -50,6 +50,11 @@ type RedisClusterStatus struct {
 // RedisClusterState describe the state of a Redis cluster.
 type RedisClusterState string
 
+const (
+	// RedisClusterStateInitializing indicates that a Redis cluster is being initialized.
+	RedisClusterStateInitializing RedisClusterState = "initializing"
+)
+
 // RedisClusterCRD is the CRD for Redis clusters.
 var RedisClusterCRD = &apiextensionsv1beta1.CustomResourceDefinition{
 	ObjectMeta: metav1.ObjectMeta{
