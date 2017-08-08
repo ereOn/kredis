@@ -37,8 +37,8 @@ type RedisCluster struct {
 
 // RedisClusterSpec is the specification for Redis clusters.
 type RedisClusterSpec struct {
-	Instances int `json:"instances"`
-	Slaves    int `json:"slaves"`
+	Instances  int `json:"instances"`
+	Duplicates int `json:"duplicates"`
 }
 
 // RedisClusterStatus describes the status of a Redis cluster.

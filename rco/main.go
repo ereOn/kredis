@@ -8,7 +8,6 @@ import (
 	"os/signal"
 	"syscall"
 
-	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
@@ -26,7 +25,7 @@ var (
 	kubeconfig = clientcmd.RecommendedHomeFile
 	namespace  = "default"
 	instances  = 3
-	slaves     = 1
+	duplicates = 2
 )
 
 // WithCancelOnInterupt returns a context that expires when an interruption occurs.
@@ -58,7 +57,6 @@ func buildConfig(kubeconfig string) (*rest.Config, error) {
 	return config, err
 }
 
-var apiextensionsClientset *apiextensionsclient.Clientset
 var clientset *client.Clientset
 
 var rootCmd = &cobra.Command{
@@ -86,7 +84,7 @@ var registerCmd = &cobra.Command{
 	Short:        "Register the custom resource definition in the Kubernetes cluster.",
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		_, err := crd.Register(apiextensionsClientset)
+		_, err := crd.Register(clientset.APIExtensionsClientset)
 
 		return err
 	},
@@ -97,7 +95,7 @@ var unregisterCmd = &cobra.Command{
 	Short:        "Unregister the custom resource definition from the Kubernetes cluster.",
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return crd.Unregister(apiextensionsClientset)
+		return crd.Unregister(clientset.APIExtensionsClientset)
 	},
 }
 
@@ -117,8 +115,8 @@ var createCmd = &cobra.Command{
 				Name: name,
 			},
 			Spec: crd.RedisClusterSpec{
-				Instances: instances,
-				Slaves:    slaves,
+				Instances:  instances,
+				Duplicates: duplicates,
 			},
 		}
 
@@ -178,7 +176,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&kubeconfig, "kubeconfig", kubeconfig, "The path to a kubectl configuration. Necessary when the tool runs outside the cluster.")
 	createCmd.Flags().StringVarP(&namespace, "namespace", "n", namespace, "The namespace to create the Redis cluster into.")
 	createCmd.Flags().IntVar(&instances, "instances", instances, "The number of master Redis instances.")
-	createCmd.Flags().IntVar(&slaves, "slaves", slaves, "The number of slave Redis instances per master.")
+	createCmd.Flags().IntVar(&duplicates, "duplicates", duplicates, "The number of duplicate Redis instances per master.")
 	deleteCmd.Flags().StringVarP(&namespace, "namespace", "n", namespace, "The namespace to delete the Redis cluster from.")
 
 	rootCmd.AddCommand(registerCmd)
