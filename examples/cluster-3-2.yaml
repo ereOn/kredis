@@ -47,7 +47,7 @@ spec:
   - metadata:
       name: redis-data
       annotations:
-        volume.beta.kubernetes.io/storage-class: anything
+        volume.beta.kubernetes.io/storage-class: standard
     spec:
       accessModes: ["ReadWriteOnce"]
       resources:
