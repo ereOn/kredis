@@ -2,15 +2,14 @@ package operator
 
 import (
 	"context"
-	"encoding/json"
 
+	"github.com/ereOn/k8s-redis-cluster-operator/client"
 	"github.com/ereOn/k8s-redis-cluster-operator/crd"
 	"github.com/go-kit/kit/log"
 
 	apiv1 "k8s.io/api/core/v1"
+	"k8s.io/api/extensions/v1beta1"
 	"k8s.io/apimachinery/pkg/fields"
-	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 )
 
@@ -19,13 +18,15 @@ import (
 // There should be only one operator running at any given time in a kubernetes
 // cluster.
 type Operator struct {
-	client                    *rest.RESTClient
+	clientset                 *client.Clientset
 	logger                    log.Logger
 	invalidRedisClusters      queue
 	unmarkedRedisClusters     queue
 	initializingRedisClusters queue
-	store                     cache.Store
-	controller                cache.Controller
+	redisClustersStore        cache.Store
+	redisClustersController   cache.Controller
+	replicasetsStore          cache.Store
+	replicasetsController     cache.Controller
 }
 
 type queue struct {
@@ -50,9 +51,9 @@ func (q *queue) Remove(redisCluster *crd.RedisCluster) {
 }
 
 // New create a new operator.
-func New(client *rest.RESTClient, logger log.Logger) *Operator {
+func New(clientset *client.Clientset, logger log.Logger) *Operator {
 	o := &Operator{
-		client:                    client,
+		clientset:                 clientset,
 		logger:                    logger,
 		invalidRedisClusters:      queue{Name: "invalid"},
 		unmarkedRedisClusters:     queue{Name: "unmarked"},
@@ -60,13 +61,13 @@ func New(client *rest.RESTClient, logger log.Logger) *Operator {
 	}
 
 	source := cache.NewListWatchFromClient(
-		o.client,
+		o.clientset.RedisClustersClient,
 		crd.RedisClusterDefinitionName,
 		apiv1.NamespaceAll,
 		fields.Everything(),
 	)
 
-	o.store, o.controller = cache.NewInformer(
+	o.redisClustersStore, o.redisClustersController = cache.NewInformer(
 		source,
 		&crd.RedisCluster{},
 		0,
@@ -77,12 +78,27 @@ func New(client *rest.RESTClient, logger log.Logger) *Operator {
 		},
 	)
 
+	source = cache.NewListWatchFromClient(
+		o.clientset.ExtensionsV1beta1().RESTClient(),
+		"replicasets",
+		apiv1.NamespaceAll,
+		fields.Everything(),
+	)
+
+	o.replicasetsStore, o.replicasetsController = cache.NewInformer(
+		source,
+		&v1beta1.ReplicaSet{},
+		0,
+		cache.ResourceEventHandlerFuncs{},
+	)
+
 	return o
 }
 
 // Run start the operator for as long as the specified context lives.
 func (o *Operator) Run(ctx context.Context) {
-	o.controller.Run(ctx.Done())
+	go o.replicasetsController.Run(ctx.Done())
+	o.redisClustersController.Run(ctx.Done())
 }
 
 func (o *Operator) getQueue(redisCluster *crd.RedisCluster) *queue {
@@ -132,31 +148,15 @@ func (o *Operator) onDelete(old interface{}) {
 }
 
 func (o *Operator) synchronize() {
+	var operations []Operation
+
 	for _, redisCluster := range o.unmarkedRedisClusters.Items {
-		// TODO: Refactor this, handle errors and move to operations.go
-		body, err := json.Marshal(struct {
-			Status crd.RedisClusterStatus `json:"status"`
-		}{
-			Status: crd.RedisClusterStatus{
-				State:   crd.RedisClusterStateInitializing,
-				Message: "Initializing Redis cluster.",
-			},
-		})
+		operations = append(operations, SetStatus(o.clientset.RedisClustersClient, redisCluster, crd.RedisClusterStateInitializing, "Initializing Redis cluster"))
+	}
 
-		if err != nil {
-			o.logger.Log("event", "serialize", "error", err)
-			continue
-		}
-
-		if err = o.client.
-			Patch(types.MergePatchType).
-			Resource(crd.RedisClusterDefinitionName).
-			Namespace(redisCluster.Namespace).
-			Name(redisCluster.Name).
-			Body(body).
-			Do().
-			Error(); err != nil {
-			o.logger.Log("event", "foo", "error", err)
+	for _, operation := range operations {
+		if err := operation(); err != nil {
+			o.logger.Log("event", "operation failure", "error", err)
 		}
 	}
 }

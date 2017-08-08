@@ -10,7 +10,6 @@ import (
 
 	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
 	"k8s.io/client-go/rest"
@@ -59,9 +58,8 @@ func buildConfig(kubeconfig string) (*rest.Config, error) {
 	return config, err
 }
 
-var clientset *apiextensionsclient.Clientset
-var redisClusterClient *rest.RESTClient
-var redisClusterScheme *runtime.Scheme
+var apiextensionsClientset *apiextensionsclient.Clientset
+var clientset *client.Clientset
 
 var rootCmd = &cobra.Command{
 	Use:   "rco",
@@ -73,13 +71,7 @@ var rootCmd = &cobra.Command{
 			return err
 		}
 
-		clientset, err = apiextensionsclient.NewForConfig(config)
-
-		if err != nil {
-			return err
-		}
-
-		redisClusterClient, redisClusterScheme, err = client.New(config)
+		clientset, err = client.NewForConfig(config)
 
 		if err != nil {
 			return err
@@ -94,7 +86,7 @@ var registerCmd = &cobra.Command{
 	Short:        "Register the custom resource definition in the Kubernetes cluster.",
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		_, err := crd.Register(clientset)
+		_, err := crd.Register(apiextensionsClientset)
 
 		return err
 	},
@@ -105,7 +97,7 @@ var unregisterCmd = &cobra.Command{
 	Short:        "Unregister the custom resource definition from the Kubernetes cluster.",
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return crd.Unregister(clientset)
+		return crd.Unregister(apiextensionsClientset)
 	},
 }
 
@@ -130,7 +122,7 @@ var createCmd = &cobra.Command{
 			},
 		}
 
-		if err := redisClusterClient.Post().Resource(crd.RedisClusterDefinitionName).Namespace(namespace).Body(&redisCluster).Do().Into(&redisCluster); err != nil {
+		if err := clientset.RedisClustersClient.Post().Resource(crd.RedisClusterDefinitionName).Namespace(namespace).Body(&redisCluster).Do().Into(&redisCluster); err != nil {
 			return fmt.Errorf("failed to create Redis cluster: %s", err)
 		}
 
@@ -152,7 +144,7 @@ var deleteCmd = &cobra.Command{
 
 		name := args[0]
 
-		if err := redisClusterClient.Delete().Resource(crd.RedisClusterDefinitionName).Namespace(namespace).Do().Error(); err != nil {
+		if err := clientset.RedisClustersClient.Delete().Resource(crd.RedisClusterDefinitionName).Namespace(namespace).Do().Error(); err != nil {
 			return fmt.Errorf("failed to delete Redis cluster: %s", err)
 		}
 
@@ -171,7 +163,7 @@ var manageCmd = &cobra.Command{
 		defer cancel()
 
 		logger := log.NewLogfmtLogger(log.NewSyncWriter(os.Stderr))
-		operator := operator.New(redisClusterClient, logger)
+		operator := operator.New(clientset, logger)
 
 		logger.Log("event", "operator running")
 		defer logger.Log("event", "operator stopped")
