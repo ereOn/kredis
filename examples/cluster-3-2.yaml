@@ -5,3 +5,51 @@ metadata:
 spec:
   instances: 3
   duplicates: 2
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      terminationGracePeriodSeconds: 10
+      containers:
+      - name: redis
+        image: "redis:3.2.0-alpine"
+        command:
+          - "redis-server"
+        args:
+          - "/etc/redis/redis.conf"
+          - "--protected-mode"
+          - "no"
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "100Mi"
+        ports:
+          - name: redis
+            containerPort: 6379
+            protocol: "TCP"
+          - name: cluster
+            containerPort: 16379
+            protocol: "TCP"
+        volumeMounts:
+          - name: "redis-conf"
+            mountPath: "/etc/redis"
+          - name: "redis-data"
+            mountPath: "/var/lib/redis"
+      volumes:
+        - name: "redis-conf"
+          configMap:
+            name: "redis-conf"
+            items:
+              - key: "redis.conf"
+                path: "redis.conf"
+  volumeClaimTemplates:
+  - metadata:
+      name: redis-data
+      annotations:
+        volume.beta.kubernetes.io/storage-class: anything
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 100Mi

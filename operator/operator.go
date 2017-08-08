@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"strconv"
 	"sync"
 	"time"
 
@@ -12,9 +11,8 @@ import (
 	"github.com/ereOn/k8s-redis-cluster-operator/crd"
 	"github.com/go-kit/kit/log"
 
+	"k8s.io/api/apps/v1beta1"
 	"k8s.io/api/core/v1"
-	"k8s.io/api/extensions/v1beta1"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/client-go/tools/cache"
@@ -31,10 +29,11 @@ type Operator struct {
 	invalidRedisClusters      queue
 	unmarkedRedisClusters     queue
 	initializingRedisClusters queue
+	initializedRedisClusters  queue
 	redisClustersStore        cache.Store
 	redisClustersController   cache.Controller
-	replicaSetsStore          cache.Store
-	replicaSetsController     cache.Controller
+	statefulSetsStore         cache.Store
+	statefulSetsController    cache.Controller
 }
 
 type queue struct {
@@ -78,6 +77,7 @@ func New(clientset *client.Clientset, logger log.Logger) *Operator {
 		invalidRedisClusters:      queue{Name: "invalid"},
 		unmarkedRedisClusters:     queue{Name: "unmarked"},
 		initializingRedisClusters: queue{Name: "initializing"},
+		initializedRedisClusters:  queue{Name: "initialized"},
 	}
 
 	source := cache.NewListWatchFromClient(
@@ -99,15 +99,15 @@ func New(clientset *client.Clientset, logger log.Logger) *Operator {
 	)
 
 	source = cache.NewListWatchFromClient(
-		o.clientset.ExtensionsV1beta1().RESTClient(),
-		"replicasets",
+		o.clientset.AppsV1beta1().RESTClient(),
+		"statefulsets",
 		v1.NamespaceAll,
 		fields.Everything(),
 	)
 
-	o.replicaSetsStore, o.replicaSetsController = cache.NewInformer(
+	o.statefulSetsStore, o.statefulSetsController = cache.NewInformer(
 		source,
-		&v1beta1.ReplicaSet{},
+		&v1beta1.StatefulSet{},
 		0,
 		cache.ResourceEventHandlerFuncs{},
 	)
@@ -117,7 +117,7 @@ func New(clientset *client.Clientset, logger log.Logger) *Operator {
 
 // Run start the operator for as long as the specified context lives.
 func (o *Operator) Run(ctx context.Context) {
-	go o.replicaSetsController.Run(ctx.Done())
+	go o.statefulSetsController.Run(ctx.Done())
 	o.redisClustersController.Run(ctx.Done())
 }
 
@@ -127,6 +127,8 @@ func (o *Operator) getQueue(redisCluster *crd.RedisCluster) *queue {
 		return &o.unmarkedRedisClusters
 	case crd.RedisClusterStateInitializing:
 		return &o.initializingRedisClusters
+	case crd.RedisClusterStateInitialized:
+		return &o.initializedRedisClusters
 	default:
 		return &o.invalidRedisClusters
 	}
@@ -194,25 +196,20 @@ func (o *Operator) synchronize() {
 	var operations []Operation
 
 	for _, redisCluster := range o.unmarkedRedisClusters.Items {
-		operations = append(operations, SetStatus(o.clientset.RedisClustersClient, redisCluster, crd.RedisClusterStateInitializing, "Initializing Redis cluster"))
+		operations = append(operations, SetStatus(o.clientset.RedisClustersClient, redisCluster, crd.RedisClusterStateInitializing, "Initializing Redis cluster."))
 	}
 
 	for _, redisCluster := range o.initializingRedisClusters.Items {
-		expectedReplicaSets := o.getExpectedReplicaSetsFor(redisCluster)
-		replicaSets, extraReplicaSets := o.getReplicaSetsFor(redisCluster)
+		expectedStatefulSet := o.getExpectedStatefulSetFor(redisCluster)
 
-		for i, replicaSet := range replicaSets {
-			if replicaSet == nil {
-				operations = append(operations, CreateReplicaSet(o.clientset.ExtensionsV1beta1().RESTClient(), expectedReplicaSets[i]))
+		if statefulSet := o.getStatefulSetFor(redisCluster); statefulSet != nil {
+			if compareStatefulSets(statefulSet, expectedStatefulSet) {
+				operations = append(operations, SetStatus(o.clientset.RedisClustersClient, redisCluster, crd.RedisClusterStateInitialized, "Setting-up shards in Redis cluster."))
 			} else {
-				if !compareReplicaSets(expectedReplicaSets[i], replicaSet) {
-					operations = append(operations, UpdateReplicaSet(o.clientset.ExtensionsV1beta1().RESTClient(), expectedReplicaSets[i]))
-				}
+				// TODO: Update.
 			}
-		}
-
-		for _, replicaSet := range extraReplicaSets {
-			operations = append(operations, DeleteReplicaSet(o.clientset.ExtensionsV1beta1().RESTClient(), replicaSet.Namespace, replicaSet.Name))
+		} else {
+			operations = append(operations, CreateStatefulSet(o.clientset.AppsV1beta1().RESTClient(), expectedStatefulSet))
 		}
 	}
 
@@ -223,119 +220,50 @@ func (o *Operator) synchronize() {
 	}
 }
 
-func (o *Operator) getExpectedReplicaSetsFor(redisCluster *crd.RedisCluster) (result []*v1beta1.ReplicaSet) {
-	var replicas int32 = 1
+func (o *Operator) getExpectedStatefulSetFor(redisCluster *crd.RedisCluster) *v1beta1.StatefulSet {
+	replicas := int32(redisCluster.Spec.Instances * redisCluster.Spec.Duplicates)
 
-	for i := 0; i < redisCluster.Spec.Instances; i++ {
-		for j := 0; j < redisCluster.Spec.Duplicates; j++ {
-			name := fmt.Sprintf("%s-%d-%d", redisCluster.Name, i, j)
-
-			replicaSet := &v1beta1.ReplicaSet{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      name,
-					Namespace: redisCluster.Namespace,
-				},
-				Spec: v1beta1.ReplicaSetSpec{
-					Replicas: &replicas,
-					Template: v1.PodTemplateSpec{
-						ObjectMeta: metav1.ObjectMeta{
-							Name: name,
-							Labels: map[string]string{
-								"app": "redis",
-							},
-							Annotations: map[string]string{
-								CreatedByAnnotation:      fmt.Sprintf("%s", redisCluster.UID),
-								PrimaryIndexAnnotation:   fmt.Sprintf("%d", i),
-								SecondaryIndexAnnotation: fmt.Sprintf("%d", j),
-							},
-						},
-						Spec: v1.PodSpec{
-							Containers: []v1.Container{
-								v1.Container{
-									Name:    "redis",
-									Image:   "redis:3.2.0-alpine",
-									Command: []string{"redis-server"},
-									Args: []string{
-										"/etc/redis/redis.conf",
-										"--protected-mode",
-										"no",
-									},
-									Resources: v1.ResourceRequirements{
-										Requests: v1.ResourceList{
-											v1.ResourceCPU:    resource.MustParse("100m"),
-											v1.ResourceMemory: resource.MustParse("100Mi"),
-										},
-									},
-									Ports: []v1.ContainerPort{
-										v1.ContainerPort{
-											Name:          "redis",
-											ContainerPort: 6379,
-											Protocol:      v1.ProtocolTCP,
-										},
-										v1.ContainerPort{
-											Name:          "redis-cluster",
-											ContainerPort: 16379,
-											Protocol:      v1.ProtocolTCP,
-										},
-									},
-								},
-							},
-						},
-					},
-				},
-			}
-
-			result = append(result, replicaSet)
-		}
+	statefulSet := &v1beta1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      redisCluster.Name,
+			Namespace: redisCluster.Namespace,
+			Annotations: map[string]string{
+				CreatedByAnnotation: fmt.Sprintf("%s", redisCluster.UID),
+			},
+		},
+		Spec: v1beta1.StatefulSetSpec{
+			ServiceName:          redisCluster.Name,
+			Replicas:             &replicas,
+			Template:             redisCluster.Spec.Template,
+			VolumeClaimTemplates: redisCluster.Spec.VolumeClaimTemplates,
+			PodManagementPolicy:  redisCluster.Spec.PodManagementPolicy,
+			UpdateStrategy:       redisCluster.Spec.UpdateStrategy,
+			RevisionHistoryLimit: redisCluster.Spec.RevisionHistoryLimit,
+		},
 	}
 
-	return
+	return statefulSet
 }
 
-func (o *Operator) getReplicaSetsFor(redisCluster *crd.RedisCluster) (owned []*v1beta1.ReplicaSet, extra []*v1beta1.ReplicaSet) {
-	owned = make([]*v1beta1.ReplicaSet, redisCluster.Spec.Instances)
+func (o *Operator) getStatefulSetFor(redisCluster *crd.RedisCluster) *v1beta1.StatefulSet {
+	for _, statefulSet := range o.statefulSetsStore.List() {
+		statefulSet := statefulSet.(*v1beta1.StatefulSet)
 
-	redisClusterUID := fmt.Sprintf("%s", redisCluster.UID)
-
-	for _, replicaSet := range o.replicaSetsStore.List() {
-		replicaSet := replicaSet.(*v1beta1.ReplicaSet)
-
-		if replicaSet.Namespace != redisCluster.Namespace {
+		if statefulSet.Namespace != redisCluster.Namespace {
 			continue
 		}
 
-		if uid, ok := replicaSet.GetAnnotations()[CreatedByAnnotation]; !ok || uid != redisClusterUID {
+		if statefulSet.Name != redisCluster.Name {
 			continue
 		}
 
-		primaryIndex, err := strconv.Atoi(replicaSet.GetAnnotations()[PrimaryIndexAnnotation])
-
-		if err != nil {
-			extra = append(extra, replicaSet)
-			continue
-		}
-
-		secondaryIndex, err := strconv.Atoi(replicaSet.GetAnnotations()[SecondaryIndexAnnotation])
-
-		if err != nil {
-			extra = append(extra, replicaSet)
-			continue
-		}
-
-		index := primaryIndex*redisCluster.Spec.Instances + secondaryIndex
-
-		if owned[index] != nil {
-			extra = append(extra, replicaSet)
-			continue
-		}
-
-		owned[index] = replicaSet
+		return statefulSet
 	}
 
-	return
+	return nil
 }
 
-func compareReplicaSets(lhs, rhs *v1beta1.ReplicaSet) bool {
+func compareStatefulSets(lhs, rhs *v1beta1.StatefulSet) bool {
 	lb, _ := lhs.Spec.Marshal()
 	rb, _ := rhs.Spec.Marshal()
 

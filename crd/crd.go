@@ -3,6 +3,8 @@ package crd
 import (
 	"reflect"
 
+	"k8s.io/api/apps/v1beta1"
+	"k8s.io/api/core/v1"
 	apiextensionsv1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
 	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 
@@ -37,8 +39,13 @@ type RedisCluster struct {
 
 // RedisClusterSpec is the specification for Redis clusters.
 type RedisClusterSpec struct {
-	Instances  int `json:"instances"`
-	Duplicates int `json:"duplicates"`
+	Instances            int                               `json:"instances"`
+	Duplicates           int                               `json:"duplicates"`
+	Template             v1.PodTemplateSpec                `json:"template"`
+	VolumeClaimTemplates []v1.PersistentVolumeClaim        `json:"volumeClaimTemplates,omitempty"`
+	PodManagementPolicy  v1beta1.PodManagementPolicyType   `json:"podManagementPolicy,omitempty"`
+	UpdateStrategy       v1beta1.StatefulSetUpdateStrategy `json:"updateStrategy,omitempty"`
+	RevisionHistoryLimit *int32                            `json:"revisionHistoryLimit,omitempty"`
 }
 
 // RedisClusterStatus describes the status of a Redis cluster.
@@ -53,6 +60,8 @@ type RedisClusterState string
 const (
 	// RedisClusterStateInitializing indicates that a Redis cluster is being initialized.
 	RedisClusterStateInitializing RedisClusterState = "initializing"
+	// RedisClusterStateInitialized indicates that a Redis cluster was initialized.
+	RedisClusterStateInitialized RedisClusterState = "initialized"
 )
 
 // RedisClusterCRD is the CRD for Redis clusters.
