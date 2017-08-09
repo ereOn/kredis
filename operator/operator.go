@@ -1,10 +1,9 @@
 package operator
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"sync"
+	"reflect"
 	"time"
 
 	"github.com/ereOn/k8s-redis-cluster-operator/client"
@@ -15,6 +14,7 @@ import (
 	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/tools/cache"
 )
 
@@ -23,61 +23,21 @@ import (
 // There should be only one operator running at any given time in a kubernetes
 // cluster.
 type Operator struct {
-	lock                      sync.Mutex
-	clientset                 *client.Clientset
-	logger                    log.Logger
-	invalidRedisClusters      queue
-	unmarkedRedisClusters     queue
-	initializingRedisClusters queue
-	initializedRedisClusters  queue
-	redisClustersStore        cache.Store
-	redisClustersController   cache.Controller
-	statefulSetsStore         cache.Store
-	statefulSetsController    cache.Controller
-}
-
-type queue struct {
-	Name  string
-	Items []*crd.RedisCluster
-}
-
-func (q queue) String() string {
-	return q.Name
-}
-
-func (q *queue) Add(redisCluster *crd.RedisCluster) bool {
-	for _, rc := range q.Items {
-		if redisCluster.Name == rc.Name {
-			return false
-		}
-	}
-
-	q.Items = append(q.Items, redisCluster)
-
-	return true
-}
-
-func (q *queue) Remove(redisCluster *crd.RedisCluster) bool {
-	for i, rc := range q.Items {
-		if redisCluster.Name == rc.Name {
-			q.Items = append(q.Items[:i], q.Items[i+1:]...)
-
-			return true
-		}
-	}
-
-	return false
+	clientset               *client.Clientset
+	logger                  log.Logger
+	redisClustersStore      cache.Store
+	redisClustersController cache.Controller
+	servicesStore           cache.Store
+	servicesController      cache.Controller
+	statefulSetsStore       cache.Store
+	statefulSetsController  cache.Controller
 }
 
 // New create a new operator.
 func New(clientset *client.Clientset, logger log.Logger) *Operator {
 	o := &Operator{
-		clientset:                 clientset,
-		logger:                    logger,
-		invalidRedisClusters:      queue{Name: "invalid"},
-		unmarkedRedisClusters:     queue{Name: "unmarked"},
-		initializingRedisClusters: queue{Name: "initializing"},
-		initializedRedisClusters:  queue{Name: "initialized"},
+		clientset: clientset,
+		logger:    logger,
 	}
 
 	source := cache.NewListWatchFromClient(
@@ -91,11 +51,21 @@ func New(clientset *client.Clientset, logger log.Logger) *Operator {
 		source,
 		&crd.RedisCluster{},
 		time.Minute,
-		cache.ResourceEventHandlerFuncs{
-			AddFunc:    o.onAdd,
-			UpdateFunc: o.onUpdate,
-			DeleteFunc: o.onDelete,
-		},
+		cache.ResourceEventHandlerFuncs{},
+	)
+
+	source = cache.NewListWatchFromClient(
+		o.clientset.CoreV1().RESTClient(),
+		"services",
+		v1.NamespaceAll,
+		fields.Everything(),
+	)
+
+	o.servicesStore, o.servicesController = cache.NewInformer(
+		source,
+		&v1.Service{},
+		0,
+		cache.ResourceEventHandlerFuncs{},
 	)
 
 	source = cache.NewListWatchFromClient(
@@ -117,105 +87,59 @@ func New(clientset *client.Clientset, logger log.Logger) *Operator {
 
 // Run start the operator for as long as the specified context lives.
 func (o *Operator) Run(ctx context.Context) {
+	go o.servicesController.Run(ctx.Done())
 	go o.statefulSetsController.Run(ctx.Done())
-	o.redisClustersController.Run(ctx.Done())
-}
+	go o.redisClustersController.Run(ctx.Done())
 
-func (o *Operator) getQueue(redisCluster *crd.RedisCluster) *queue {
-	switch redisCluster.Status.State {
-	case "":
-		return &o.unmarkedRedisClusters
-	case crd.RedisClusterStateInitializing:
-		return &o.initializingRedisClusters
-	case crd.RedisClusterStateInitialized:
-		return &o.initializedRedisClusters
-	default:
-		return &o.invalidRedisClusters
-	}
-}
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
 
-func (o *Operator) onAdd(new interface{}) {
-	defer o.synchronize()
-
-	o.lock.Lock()
-	defer o.lock.Unlock()
-
-	newRedisCluster := new.(*crd.RedisCluster)
-	newQueue := o.getQueue(newRedisCluster)
-
-	if newQueue.Add(newRedisCluster) {
-		o.logger.Log("event", "added", "redis-cluster", newRedisCluster.Name, "queue", newQueue)
-	}
-}
-
-func (o *Operator) onUpdate(old interface{}, new interface{}) {
-	defer o.synchronize()
-
-	o.lock.Lock()
-	defer o.lock.Unlock()
-
-	oldRedisCluster := old.(*crd.RedisCluster)
-	oldQueue := o.getQueue(oldRedisCluster)
-	newRedisCluster := new.(*crd.RedisCluster)
-	newQueue := o.getQueue(newRedisCluster)
-
-	if oldQueue != newQueue {
-		removed := oldQueue.Remove(oldRedisCluster)
-		added := newQueue.Add(newRedisCluster)
-
-		if removed {
-			if added {
-				o.logger.Log("event", "updated", "redis-cluster", oldRedisCluster.Name, "old-queue", oldQueue, "new-queue", newQueue)
-			} else {
-				o.logger.Log("event", "removed", "redis-cluster", oldRedisCluster.Name, "old-queue", oldQueue)
-			}
-		} else if added {
-			o.logger.Log("event", "added", "redis-cluster", newRedisCluster.Name, "queue", newQueue)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			o.synchronize()
 		}
-	}
-}
-
-func (o *Operator) onDelete(old interface{}) {
-	defer o.synchronize()
-
-	o.lock.Lock()
-	defer o.lock.Unlock()
-
-	oldRedisCluster := old.(*crd.RedisCluster)
-	oldQueue := o.getQueue(oldRedisCluster)
-
-	if oldQueue.Remove(oldRedisCluster) {
-		o.logger.Log("event", "removed", "redis-cluster", oldRedisCluster.Name, "queue", oldQueue)
 	}
 }
 
 func (o *Operator) synchronize() {
-	o.lock.Lock()
-	defer o.lock.Unlock()
+	for _, redisCluster := range o.redisClustersStore.List() {
+		redisCluster := redisCluster.(*crd.RedisCluster)
 
-	var operations []Operation
+		expectedService := o.getExpectedServiceFor(redisCluster)
 
-	for _, redisCluster := range o.unmarkedRedisClusters.Items {
-		operations = append(operations, SetStatus(o.clientset.RedisClustersClient, redisCluster, crd.RedisClusterStateInitializing, "Initializing Redis cluster."))
-	}
+		if service := o.getServiceFor(redisCluster); service != nil {
+			if !compareServices(service, expectedService) {
+				// TODO: Update the service and write an event.
+				o.logger.Log("event", "services differ", "redis-cluster", redisCluster.Name, "namespace", redisCluster.Namespace)
+				continue
+			}
+		} else {
+			if err := CreateService(o.clientset.CoreV1().RESTClient(), expectedService); err != nil {
+				o.logger.Log("event", "error", "redis-cluster", redisCluster.Name, "namespace", redisCluster.Namespace, "error", err)
+				// TODO: Write an event.
+			}
 
-	for _, redisCluster := range o.initializingRedisClusters.Items {
+			continue
+		}
+
 		expectedStatefulSet := o.getExpectedStatefulSetFor(redisCluster)
 
 		if statefulSet := o.getStatefulSetFor(redisCluster); statefulSet != nil {
-			if compareStatefulSets(statefulSet, expectedStatefulSet) {
-				operations = append(operations, SetStatus(o.clientset.RedisClustersClient, redisCluster, crd.RedisClusterStateInitialized, "Setting-up shards in Redis cluster."))
-			} else {
-				// TODO: Update.
+			if !compareStatefulSets(statefulSet, expectedStatefulSet) {
+				// TODO: Update the statefulSet and write an event.
+				o.logger.Log("event", "stateful-sets differ", "redis-cluster", redisCluster.Name, "namespace", redisCluster.Namespace)
+				continue
 			}
 		} else {
-			operations = append(operations, CreateStatefulSet(o.clientset.AppsV1beta1().RESTClient(), expectedStatefulSet))
-		}
-	}
+			if err := CreateStatefulSet(o.clientset.AppsV1beta1().RESTClient(), expectedStatefulSet); err != nil {
+				o.logger.Log("event", "error", "redis-cluster", redisCluster.Name, "namespace", redisCluster.Namespace, "error", err)
+				// TODO: Write an event.
+			}
 
-	for _, operation := range operations {
-		if err := operation(); err != nil {
-			o.logger.Log("event", "operation failure", "error", err)
+			continue
 		}
 	}
 }
@@ -264,12 +188,63 @@ func (o *Operator) getStatefulSetFor(redisCluster *crd.RedisCluster) *v1beta1.St
 }
 
 func compareStatefulSets(lhs, rhs *v1beta1.StatefulSet) bool {
-	lb, _ := lhs.Spec.Marshal()
-	rb, _ := rhs.Spec.Marshal()
+	//FIXME: This is too broad and will never match.
+	return reflect.DeepEqual(lhs.Spec, rhs.Spec)
+}
 
-	if bytes.Compare(lb, rb) != 0 {
-		return false
+func (o *Operator) getExpectedServiceFor(redisCluster *crd.RedisCluster) *v1.Service {
+	service := &v1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      redisCluster.Name,
+			Namespace: redisCluster.Namespace,
+			Annotations: map[string]string{
+				CreatedByAnnotation: fmt.Sprintf("%s", redisCluster.UID),
+			},
+			Labels: redisCluster.Spec.Template.ObjectMeta.Labels,
+		},
+		Spec: v1.ServiceSpec{
+			Ports: []v1.ServicePort{
+				v1.ServicePort{
+					Name:       "redis",
+					Port:       6379,
+					TargetPort: intstr.FromInt(6379),
+					Protocol:   v1.ProtocolTCP,
+				},
+				v1.ServicePort{
+					Name:       "redis-cluster",
+					Port:       16379,
+					TargetPort: intstr.FromInt(16379),
+					Protocol:   v1.ProtocolTCP,
+				},
+			},
+			ClusterIP:       v1.ClusterIPNone,
+			Type:            v1.ServiceTypeClusterIP,
+			SessionAffinity: v1.ServiceAffinityNone,
+		},
 	}
 
-	return true
+	return service
+}
+
+func (o *Operator) getServiceFor(redisCluster *crd.RedisCluster) *v1.Service {
+	for _, service := range o.servicesStore.List() {
+		service := service.(*v1.Service)
+
+		if service.Namespace != redisCluster.Namespace {
+			continue
+		}
+
+		if service.Name != redisCluster.Name {
+			continue
+		}
+
+		return service
+	}
+
+	return nil
+}
+
+func compareServices(lhs, rhs *v1.Service) bool {
+	//FIXME: This is too broad.
+	return reflect.DeepEqual(lhs.Spec, rhs.Spec)
 }

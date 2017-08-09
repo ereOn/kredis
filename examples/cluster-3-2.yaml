@@ -28,7 +28,7 @@ spec:
           - name: redis
             containerPort: 6379
             protocol: "TCP"
-          - name: cluster
+          - name: redis-cluster
             containerPort: 16379
             protocol: "TCP"
         volumeMounts:
@@ -53,3 +53,16 @@ spec:
       resources:
         requests:
           storage: 100Mi
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redis-conf
+data:
+  redis.conf: |
+    appendonly yes
+    cluster-enabled yes
+    cluster-config-file /var/lib/redis/nodes.conf
+    cluster-node-timeout 5000
+    dir /var/lib/redis
+    port 6379
