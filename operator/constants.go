@@ -9,7 +9,7 @@ const (
 	// ServiceAnnotation is the annotation set on RedisClusters to indicate
 	// which service object they are responsible of.
 	ServiceAnnotation = crd.RedisClusterDefinitionGroup + "/service"
-	// ServiceAnnotation is the annotation set on RedisClusters to indicate
-	// which service object version they last created.
-	ServiceVersionAnnotation = crd.RedisClusterDefinitionGroup + "/service-version"
+	// StatefulSetAnnotation is the annotation set on RedisClusters to indicate
+	// which stateful-set object they are responsible of.
+	StatefulSetAnnotation = crd.RedisClusterDefinitionGroup + "/stateful-set"
 )

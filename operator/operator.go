@@ -3,7 +3,6 @@ package operator
 import (
 	"context"
 	"fmt"
-	"reflect"
 	"time"
 
 	"github.com/ereOn/k8s-redis-cluster-operator/client"
@@ -109,16 +108,9 @@ func (o *Operator) synchronize() {
 	for _, redisCluster := range o.redisClustersStore.List() {
 		redisCluster := redisCluster.(*crd.RedisCluster)
 
-		service, updated := o.getServiceFor(redisCluster)
+		service := o.getServiceFor(redisCluster)
 
-		if service != nil {
-			if updated {
-				o.logger.Log("event", "services differ", "redis-cluster", redisCluster.Name, "namespace", redisCluster.Namespace)
-				//expectedService := o.getExpectedServiceFor(redisCluster)
-
-				continue
-			}
-		} else {
+		if service == nil {
 			expectedService := o.getExpectedServiceFor(redisCluster)
 
 			service, err := CreateService(o.clientset.CoreV1().RESTClient(), expectedService)
@@ -129,7 +121,7 @@ func (o *Operator) synchronize() {
 			} else {
 				o.logger.Log("event", "created service", "redis-cluster", redisCluster.Name, "namespace", redisCluster.Namespace, "uid", service.UID)
 
-				if err = SetServiceInfo(o.clientset.RedisClustersClient, redisCluster, service.UID, service.ResourceVersion); err != nil {
+				if err = SetServiceInfo(o.clientset.RedisClustersClient, redisCluster, service.UID); err != nil {
 					o.logger.Log("event", "failed to update service info", "redis-cluster", redisCluster.Name, "namespace", redisCluster.Namespace, "error", err)
 				}
 			}
@@ -137,18 +129,34 @@ func (o *Operator) synchronize() {
 			continue
 		}
 
-		expectedStatefulSet := o.getExpectedStatefulSetFor(redisCluster)
+		statefulSet := o.getStatefulSetFor(redisCluster)
 
-		if statefulSet := o.getStatefulSetFor(redisCluster); statefulSet != nil {
-			if !compareStatefulSets(expectedStatefulSet, statefulSet) {
-				// TODO: Update the statefulSet and write an event.
-				o.logger.Log("event", "stateful-sets differ", "redis-cluster", redisCluster.Name, "namespace", redisCluster.Namespace)
+		if statefulSet != nil {
+			expectedStatefulSet := o.getExpectedStatefulSetFor(redisCluster)
+
+			if *expectedStatefulSet.Spec.Replicas != *statefulSet.Spec.Replicas {
+				o.logger.Log("event", "existing stateful-set has out-of-sync replicas and will be adjusted", "redis-cluster", redisCluster.Name, "namespace", redisCluster.Namespace, "current-replicas", *statefulSet.Spec.Replicas, "expected-replicas", *expectedStatefulSet.Spec.Replicas)
+
+				if err := SetStatefulSetReplicas(o.clientset.AppsV1beta1().RESTClient(), statefulSet, *expectedStatefulSet.Spec.Replicas); err != nil {
+					o.logger.Log("event", "failed to adjust replicas", "redis-cluster", redisCluster.Name, "namespace", redisCluster.Namespace, "error", err)
+				}
+
 				continue
 			}
 		} else {
-			if err := CreateStatefulSet(o.clientset.AppsV1beta1().RESTClient(), expectedStatefulSet); err != nil {
-				o.logger.Log("event", "error", "redis-cluster", redisCluster.Name, "namespace", redisCluster.Namespace, "error", err)
+			expectedStatefulSet := o.getExpectedStatefulSetFor(redisCluster)
+
+			statefulSet, err := CreateStatefulSet(o.clientset.AppsV1beta1().RESTClient(), expectedStatefulSet)
+
+			if err != nil {
+				o.logger.Log("event", "failed to create stateful-set", "redis-cluster", redisCluster.Name, "namespace", redisCluster.Namespace, "error", err)
 				// TODO: Write an event.
+			} else {
+				o.logger.Log("event", "created stateful-set", "redis-cluster", redisCluster.Name, "namespace", redisCluster.Namespace, "uid", statefulSet.UID)
+
+				if err = SetStatefulSetInfo(o.clientset.RedisClustersClient, redisCluster, statefulSet.UID); err != nil {
+					o.logger.Log("event", "failed to update stateful-set info", "redis-cluster", redisCluster.Name, "namespace", redisCluster.Namespace, "error", err)
+				}
 			}
 
 			continue
@@ -181,31 +189,28 @@ func (o *Operator) getExpectedStatefulSetFor(redisCluster *crd.RedisCluster) *v1
 	return statefulSet
 }
 
+func getStatefulSetUIDFor(redisCluster *crd.RedisCluster) types.UID {
+	if x, ok := redisCluster.Annotations[StatefulSetAnnotation]; ok {
+		return types.UID(x)
+	}
+
+	return ""
+}
+
 func (o *Operator) getStatefulSetFor(redisCluster *crd.RedisCluster) *v1beta1.StatefulSet {
-	for _, statefulSet := range o.statefulSetsStore.List() {
-		statefulSet := statefulSet.(*v1beta1.StatefulSet)
+	uid := getStatefulSetUIDFor(redisCluster)
 
-		if statefulSet.Namespace != redisCluster.Namespace {
-			continue
+	if uid != "" {
+		for _, statefulSet := range o.statefulSetsStore.List() {
+			statefulSet := statefulSet.(*v1beta1.StatefulSet)
+
+			if statefulSet.UID == uid {
+				return statefulSet
+			}
 		}
-
-		if statefulSet.Name != redisCluster.Name {
-			continue
-		}
-
-		return statefulSet
 	}
 
 	return nil
-}
-
-func compareStatefulSets(ref, actual *v1beta1.StatefulSet) bool {
-	return actual.ObjectMeta.Name == ref.ObjectMeta.Name &&
-		actual.ObjectMeta.Namespace == ref.ObjectMeta.Namespace &&
-		reflect.DeepEqual(actual.ObjectMeta.Annotations, ref.ObjectMeta.Annotations) &&
-		actual.Spec.ServiceName == ref.Spec.ServiceName &&
-		*actual.Spec.Replicas == *ref.Spec.Replicas &&
-		reflect.DeepEqual(actual.Spec.VolumeClaimTemplates, ref.Spec.VolumeClaimTemplates)
 }
 
 func (o *Operator) getExpectedServiceFor(redisCluster *crd.RedisCluster) *v1.Service {
@@ -250,25 +255,18 @@ func getServiceUIDFor(redisCluster *crd.RedisCluster) types.UID {
 	return ""
 }
 
-func getServiceVersionFor(redisCluster *crd.RedisCluster) string {
-	version, _ := redisCluster.Annotations[ServiceVersionAnnotation]
-	return version
-}
-
-func (o *Operator) getServiceFor(redisCluster *crd.RedisCluster) (*v1.Service, bool) {
+func (o *Operator) getServiceFor(redisCluster *crd.RedisCluster) *v1.Service {
 	uid := getServiceUIDFor(redisCluster)
 
 	if uid != "" {
-		version := getServiceVersionFor(redisCluster)
-
 		for _, service := range o.servicesStore.List() {
 			service := service.(*v1.Service)
 
 			if service.UID == uid {
-				return service, service.ResourceVersion != version
+				return service
 			}
 		}
 	}
 
-	return nil, false
+	return nil
 }
