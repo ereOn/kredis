@@ -86,6 +86,22 @@ func CreateStatefulSet(client rest.Interface, statefulSet *v1beta1.StatefulSet) 
 	return &result, nil
 }
 
+// DeleteStatefulSet delete a stateful-set.
+func DeleteStatefulSet(client rest.Interface, statefulSet *v1beta1.StatefulSet) error {
+	err := client.Delete().
+		Resource("statefulsets").
+		Namespace(statefulSet.Namespace).
+		Name(statefulSet.Name).
+		Do().
+		Error()
+
+	if err != nil {
+		return fmt.Errorf("deleting stateful-set \"%s\" in namespace \"%s\": %s", statefulSet.Name, statefulSet.Namespace, err)
+	}
+
+	return nil
+}
+
 // CreateService create a new service.
 func CreateService(client rest.Interface, service *v1.Service) (*v1.Service, error) {
 	var result v1.Service
@@ -102,6 +118,22 @@ func CreateService(client rest.Interface, service *v1.Service) (*v1.Service, err
 	}
 
 	return &result, nil
+}
+
+// DeleteService delete a service.
+func DeleteService(client rest.Interface, service *v1.Service) error {
+	err := client.Delete().
+		Resource("services").
+		Namespace(service.Namespace).
+		Name(service.Name).
+		Do().
+		Error()
+
+	if err != nil {
+		return fmt.Errorf("deleting service \"%s\" in namespace \"%s\": %s", service.Name, service.Namespace, err)
+	}
+
+	return nil
 }
 
 // SetStatefulSetReplicas set the replicas of a stateful-set.

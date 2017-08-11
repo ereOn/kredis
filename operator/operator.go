@@ -105,8 +105,11 @@ func (o *Operator) Run(ctx context.Context) {
 }
 
 func (o *Operator) synchronize() {
+	redisClusterUIDs := map[types.UID]bool{}
+
 	for _, redisCluster := range o.redisClustersStore.List() {
 		redisCluster := redisCluster.(*crd.RedisCluster)
+		redisClusterUIDs[redisCluster.UID] = true
 
 		service := o.getServiceFor(redisCluster)
 
@@ -160,6 +163,34 @@ func (o *Operator) synchronize() {
 			}
 
 			continue
+		}
+	}
+
+	for _, service := range o.servicesStore.List() {
+		service := service.(*v1.Service)
+
+		if uid, ok := service.Annotations[CreatedByAnnotation]; ok {
+			if !redisClusterUIDs[types.UID(uid)] {
+				o.logger.Log("event", "deleting orphan service", "service", service.Name, "namespace", service.Namespace)
+
+				if err := DeleteService(o.clientset.CoreV1().RESTClient(), service); err != nil {
+					o.logger.Log("event", "failed to delete service", "service", service.Name, "namespace", service.Namespace, "error", err)
+				}
+			}
+		}
+	}
+
+	for _, statefulSet := range o.statefulSetsStore.List() {
+		statefulSet := statefulSet.(*v1beta1.StatefulSet)
+
+		if uid, ok := statefulSet.Annotations[CreatedByAnnotation]; ok {
+			if !redisClusterUIDs[types.UID(uid)] {
+				o.logger.Log("event", "deleting orphan stateful-set", "stateful-set", statefulSet.Name, "namespace", statefulSet.Namespace)
+
+				if err := DeleteStatefulSet(o.clientset.AppsV1beta1().RESTClient(), statefulSet); err != nil {
+					o.logger.Log("event", "failed to delete stateful-set", "service", statefulSet.Name, "namespace", statefulSet.Namespace, "error", err)
+				}
+			}
 		}
 	}
 }
