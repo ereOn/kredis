@@ -41,6 +41,7 @@ type RedisCluster struct {
 type RedisClusterSpec struct {
 	Instances            int                               `json:"instances"`
 	Duplicates           int                               `json:"duplicates"`
+	Cluster              bool                              `json:"cluster"`
 	Template             v1.PodTemplateSpec                `json:"template"`
 	VolumeClaimTemplates []v1.PersistentVolumeClaim        `json:"volumeClaimTemplates,omitempty"`
 	PodManagementPolicy  v1beta1.PodManagementPolicyType   `json:"podManagementPolicy,omitempty"`

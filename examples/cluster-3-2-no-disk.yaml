@@ -1,15 +1,15 @@
 apiVersion: freelan.org/v1
 kind: RedisCluster
 metadata:
-  name: cluster-3-2
+  name: cluster-3-2-no-disk
 spec:
   instances: 3
   duplicates: 2
-  cluster: true
+  cluster: false
   template:
     metadata:
       labels:
-        app: redis
+        app: redis-no-disk
     spec:
       terminationGracePeriodSeconds: 10
       containers:
@@ -29,41 +29,23 @@ spec:
           - name: redis
             containerPort: 6379
             protocol: "TCP"
-          - name: redis-cluster
-            containerPort: 16379
-            protocol: "TCP"
         volumeMounts:
           - name: "redis-conf"
             mountPath: "/etc/redis"
-          - name: "redis-data"
-            mountPath: "/var/lib/redis"
       volumes:
         - name: "redis-conf"
           configMap:
-            name: "redis-conf"
+            name: "redis-conf-no-disk"
             items:
               - key: "redis.conf"
                 path: "redis.conf"
-  volumeClaimTemplates:
-  - metadata:
-      name: redis-data
-      annotations:
-        volume.beta.kubernetes.io/storage-class: standard
-    spec:
-      accessModes: ["ReadWriteOnce"]
-      resources:
-        requests:
-          storage: 100Mi
 ---
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: redis-conf
+  name: redis-conf-no-disk
 data:
   redis.conf: |
-    appendonly yes
-    cluster-enabled yes
-    cluster-config-file /var/lib/redis/nodes.conf
-    cluster-node-timeout 5000
-    dir /var/lib/redis
+    appendonly no
+    save ""
     port 6379

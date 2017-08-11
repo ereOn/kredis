@@ -262,17 +262,20 @@ func (o *Operator) getExpectedServiceFor(redisCluster *crd.RedisCluster) *v1.Ser
 					TargetPort: intstr.FromInt(6379),
 					Protocol:   v1.ProtocolTCP,
 				},
-				v1.ServicePort{
-					Name:       "redis-cluster",
-					Port:       16379,
-					TargetPort: intstr.FromInt(16379),
-					Protocol:   v1.ProtocolTCP,
-				},
 			},
 			ClusterIP:       v1.ClusterIPNone,
 			Type:            v1.ServiceTypeClusterIP,
 			SessionAffinity: v1.ServiceAffinityNone,
 		},
+	}
+
+	if redisCluster.Spec.Cluster {
+		service.Spec.Ports = append(service.Spec.Ports, v1.ServicePort{
+			Name:       "redis-cluster",
+			Port:       16379,
+			TargetPort: intstr.FromInt(16379),
+			Protocol:   v1.ProtocolTCP,
+		})
 	}
 
 	return service
