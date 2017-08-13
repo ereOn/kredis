@@ -1,0 +1,96 @@
+{{ range $shard := until (int $.Values.shards) }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: redis
+    shard: "{{ $shard }}"
+  name: {{ $.Release.Name }}-redis-{{ $shard }}
+spec:
+  clusterIP: None
+  ports:
+  - name: redis
+    port: 6379
+    protocol: TCP
+    targetPort: 6379
+  type: ClusterIP
+---
+apiVersion: apps/v1beta1
+kind: StatefulSet
+metadata:
+  labels:
+    app: redis
+    shard: "{{ $shard }}"
+  name: {{ $.Release.Name }}-redis-{{ $shard }}
+spec:
+  replicas: {{ $.Values.instances }}
+  revisionHistoryLimit: 10
+  serviceName: {{ $.Release.Name }}-redis-{{ $shard }}
+  template:
+    metadata:
+      labels:
+        app: redis
+        shard: "{{ $shard }}"
+    spec:
+      containers:
+      - name: redis
+        args:
+        - /etc/redis/redis.conf
+        - --protected-mode
+        - "no"
+        command:
+        - redis-server
+        image: redis:3.2.0-alpine
+        ports:
+        - containerPort: 6379
+          name: redis
+          protocol: TCP
+        - containerPort: 16379
+          name: redis-cluster
+          protocol: TCP
+        resources:
+          requests:
+            cpu: 100m
+            memory: 100Mi
+        volumeMounts:
+        - name: {{ $.Release.Name }}-redis-conf
+          mountPath: /etc/redis
+        - name: {{ $.Release.Name }}-redis-data
+          mountPath: /var/lib/redis
+      terminationGracePeriodSeconds: 10
+      volumes:
+      - name: {{ $.Release.Name }}-redis-conf
+        configMap:
+          items:
+          - key: redis.conf
+            path: redis.conf
+          name: {{ $.Release.Name }}-redis-conf
+  updateStrategy:
+    type: OnDelete
+  volumeClaimTemplates:
+  - metadata:
+      annotations:
+        volume.beta.kubernetes.io/storage-class: standard
+      creationTimestamp: null
+      name: {{ $.Release.Name }}-redis-data
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      resources:
+        requests:
+          storage: 100Mi
+{{ end }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $.Release.Name }}-redis-conf
+data:
+  redis.conf: |
+    appendonly yes
+    cluster-enabled yes
+    cluster-config-file /var/lib/redis/nodes.conf
+    cluster-node-timeout 5000
+    dir /var/lib/redis
+    port 6379
