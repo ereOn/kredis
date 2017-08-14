@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/ereOn/kredis/pkg/kredis"
 	"github.com/go-kit/kit/log"
@@ -60,14 +61,22 @@ var rootCmd = &cobra.Command{
 			logger.Log("event", "master group", "index", i, "master-group", masterGroup)
 		}
 
+		pool := &kredis.Pool{
+			IdleTimeout: time.Second * 90,
+			MaxActive:   10,
+			MaxIdle:     2,
+		}
+		defer pool.Close()
+
+		manager := kredis.NewManager(logger, pool)
+
 		logger.Log("event", "started")
 		defer logger.Log("event", "stopped")
 
 		ctx, cancel := WithCancelOnInterupt(context.Background())
 		defer cancel()
 
-		<-ctx.Done()
-
+		manager.RunForGroups(ctx, masterGroups)
 		return nil
 	},
 }
