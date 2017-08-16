@@ -15,33 +15,36 @@ type Database struct {
 
 // Feed the database with new data.
 func (d *Database) Feed(redisInstance RedisInstance, nodes ClusterNodes) error {
-	node, err := nodes.Self()
+	selfNode, err := nodes.Self()
 
 	if err != nil {
 		return fmt.Errorf("can't feed from nodes of %s: %s", redisInstance, err)
 	}
 
-	if node.Flags[FlagMaster] {
-		if err = d.addMaster(node.ID); err != nil {
-			return err
-		}
-	} else {
-		if err = d.addSlave(node.MasterID, node.ID); err != nil {
-			return err
-		}
-	}
-
 	if d.redisInstancesByID == nil {
 		d.redisInstancesByID = make(map[ClusterNodeID]RedisInstance)
+	} else if otherRedisInstance, ok := d.redisInstancesByID[selfNode.ID]; ok {
+		return fmt.Errorf("refusing to register %s for %s as it is already registered for %s", selfNode.ID, redisInstance, otherRedisInstance)
 	}
-
-	d.redisInstancesByID[node.ID] = redisInstance
 
 	if d.nodesByID == nil {
 		d.nodesByID = make(map[ClusterNodeID]ClusterNodes)
 	}
 
-	d.nodesByID[node.ID] = nodes
+	for _, node := range nodes {
+		if node.Flags[FlagMaster] {
+			if err = d.addMaster(node.ID); err != nil {
+				return err
+			}
+		} else {
+			if err = d.addSlave(node.MasterID, node.ID); err != nil {
+				return err
+			}
+		}
+	}
+
+	d.redisInstancesByID[selfNode.ID] = redisInstance
+	d.nodesByID[selfNode.ID] = nodes
 
 	return nil
 }
