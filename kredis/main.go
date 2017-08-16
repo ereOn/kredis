@@ -76,7 +76,7 @@ var rootCmd = &cobra.Command{
 		ctx, cancel := WithCancelOnInterupt(context.Background())
 		defer cancel()
 
-		manager.RunForGroups(ctx, masterGroups)
+		manager.Run(ctx, masterGroups)
 		return nil
 	},
 }
