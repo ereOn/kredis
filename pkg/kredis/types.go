@@ -377,3 +377,41 @@ func (n ClusterNode) String() string {
 
 	return buffer.String()
 }
+
+// ClusterNodes represents a list of cluster nodes.
+type ClusterNodes []ClusterNode
+
+// ParseClusterNodes parse a list of cluster nodes, as returned by the `CLUSTER
+// NODES` Redis command.
+func ParseClusterNodes(s string) (nodes ClusterNodes, err error) {
+	if s == "" {
+		err = errors.New("refusing to parse an empty list of cluster nodes")
+		return
+	}
+
+	lines := strings.Split(s, "\n")
+	var node ClusterNode
+
+	for i, line := range lines {
+		node, err = ParseClusterNode(line)
+
+		if err != nil {
+			err = fmt.Errorf("parsing line %d of cluster nodes: %s", i, err)
+			return
+		}
+
+		nodes = append(nodes, node)
+	}
+
+	return
+}
+
+func (n ClusterNodes) String() string {
+	parts := make([]string, len(n))
+
+	for i, node := range n {
+		parts[i] = node.String()
+	}
+
+	return strings.Join(parts, "\n")
+}

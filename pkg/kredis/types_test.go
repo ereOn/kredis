@@ -3,6 +3,7 @@ package kredis
 import (
 	"net"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -259,6 +260,101 @@ func TestParseClusterNode(t *testing.T) {
 				}
 
 				if !reflect.DeepEqual(*testCase.Expected, value) {
+					t.Errorf("expected:\n%v\ngot:\n%v", testCase.Expected, value)
+				}
+
+				valueStr := value.String()
+
+				if valueStr != testCase.ExpectedString {
+					t.Errorf("expected:\n%s\ngot:\n%s", testCase.ExpectedString, valueStr)
+				}
+			}
+		})
+	}
+}
+
+func TestParseClusterNodes(t *testing.T) {
+	testCases := []struct {
+		S              string
+		Expected       ClusterNodes
+		ExpectedString string
+	}{
+		{
+			`
+a 127.0.0.2:6379@16379 handshake - 0 0 0 connected
+b 127.0.0.2:6379@16379 master,myself - 0 0 0 connected
+`,
+			ClusterNodes{
+				ClusterNode{
+					ID: "a",
+					Address: ClusterNodeAddress{
+						IP:          net.ParseIP("127.0.0.2"),
+						Port:        "6379",
+						ClusterPort: "16379",
+					},
+					Flags: ClusterNodeFlags{
+						FlagHandshake: true,
+					},
+					MasterID:     "",
+					PingSent:     0,
+					PongReceived: 0,
+					Epoch:        0,
+					LinkState:    LinkStateConnected,
+					Slots:        HashSlots{},
+				},
+				ClusterNode{
+					ID: "b",
+					Address: ClusterNodeAddress{
+						IP:          net.ParseIP("127.0.0.2"),
+						Port:        "6379",
+						ClusterPort: "16379",
+					},
+					Flags: ClusterNodeFlags{
+						FlagMaster: true,
+						FlagMyself: true,
+					},
+					MasterID:     "",
+					PingSent:     0,
+					PongReceived: 0,
+					Epoch:        0,
+					LinkState:    LinkStateConnected,
+					Slots:        HashSlots{},
+				},
+			},
+			`
+a 127.0.0.2:6379@16379 handshake - 0 0 0 connected
+b 127.0.0.2:6379@16379 master,myself - 0 0 0 connected
+`,
+		},
+		{
+			"invalid",
+			nil,
+			"",
+		},
+		{
+			"",
+			nil,
+			"",
+		},
+	}
+
+	for _, testCase := range testCases {
+		testCase.S = strings.TrimSpace(testCase.S)
+		testCase.ExpectedString = strings.TrimSpace(testCase.ExpectedString)
+
+		t.Run(testCase.S, func(t *testing.T) {
+			value, err := ParseClusterNodes(testCase.S)
+
+			if testCase.Expected == nil {
+				if err == nil {
+					t.Fatal("expected an error")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("expected no error but got: %s", err)
+				}
+
+				if !reflect.DeepEqual(testCase.Expected, value) {
 					t.Errorf("expected:\n%v\ngot:\n%v", testCase.Expected, value)
 				}
 
