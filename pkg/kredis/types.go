@@ -93,10 +93,10 @@ func ParseMasterGroup(s string) (MasterGroup, error) {
 	return masterGroup, nil
 }
 
-// ClusterID represents a cluster ID.
-type ClusterID string
+// ClusterNodeID represents a cluster ID.
+type ClusterNodeID string
 
-func (i ClusterID) String() string {
+func (i ClusterNodeID) String() string {
 	if i == "" {
 		return "-"
 	}
@@ -273,10 +273,10 @@ func ParseHashSlots(s string) (slots HashSlots, err error) {
 
 // ClusterNode represents a cluster node.
 type ClusterNode struct {
-	ID           ClusterID
+	ID           ClusterNodeID
 	Address      ClusterNodeAddress
 	Flags        ClusterNodeFlags
-	MasterID     ClusterID
+	MasterID     ClusterNodeID
 	PingSent     int
 	PongReceived int
 	Epoch        int
@@ -294,7 +294,7 @@ func ParseClusterNode(s string) (result ClusterNode, err error) {
 		return
 	}
 
-	result.ID = ClusterID(parts[0])
+	result.ID = ClusterNodeID(parts[0])
 	result.Address, err = ParseClusterNodeAddress(parts[1])
 
 	if err != nil {
@@ -310,7 +310,7 @@ func ParseClusterNode(s string) (result ClusterNode, err error) {
 	}
 
 	if parts[3] != "-" {
-		result.MasterID = ClusterID(parts[3])
+		result.MasterID = ClusterNodeID(parts[3])
 	}
 
 	result.PingSent, err = strconv.Atoi(parts[4])
@@ -384,15 +384,15 @@ type ClusterNodes []ClusterNode
 // ParseClusterNodes parse a list of cluster nodes, as returned by the `CLUSTER
 // NODES` Redis command.
 func ParseClusterNodes(s string) (nodes ClusterNodes, err error) {
-	if s == "" {
-		err = errors.New("refusing to parse an empty list of cluster nodes")
-		return
-	}
-
 	lines := strings.Split(s, "\n")
+	nodes = ClusterNodes{}
 	var node ClusterNode
 
 	for i, line := range lines {
+		if line == "" {
+			continue
+		}
+
 		node, err = ParseClusterNode(line)
 
 		if err != nil {
@@ -414,4 +414,25 @@ func (n ClusterNodes) String() string {
 	}
 
 	return strings.Join(parts, "\n")
+}
+
+// Self returns the `myself` cluster node entry if one is found.
+func (n ClusterNodes) Self() (result ClusterNode, err error) {
+	for _, node := range n {
+		if node.Flags[FlagMyself] {
+			if result.ID != "" {
+				err = errors.New("can't have multiple `myself` nodes")
+				return
+			}
+
+			result = node
+		}
+	}
+
+	if result.ID == "" {
+		err = errors.New("no `myself` node found")
+		return
+	}
+
+	return
 }

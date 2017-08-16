@@ -333,7 +333,7 @@ b 127.0.0.2:6379@16379 master,myself - 0 0 0 connected
 		},
 		{
 			"",
-			nil,
+			ClusterNodes{},
 			"",
 		},
 	}
@@ -365,5 +365,114 @@ b 127.0.0.2:6379@16379 master,myself - 0 0 0 connected
 				}
 			}
 		})
+	}
+}
+
+func TestClusterNodesSelfMultiple(t *testing.T) {
+	nodes := ClusterNodes{
+		ClusterNode{
+			ID: "a",
+			Address: ClusterNodeAddress{
+				IP:          net.ParseIP("127.0.0.2"),
+				Port:        "6379",
+				ClusterPort: "16379",
+			},
+			Flags: ClusterNodeFlags{
+				FlagMyself:    true,
+				FlagHandshake: true,
+			},
+			MasterID:     "",
+			PingSent:     0,
+			PongReceived: 0,
+			Epoch:        0,
+			LinkState:    LinkStateConnected,
+			Slots:        HashSlots{},
+		},
+		ClusterNode{
+			ID: "b",
+			Address: ClusterNodeAddress{
+				IP:          net.ParseIP("127.0.0.2"),
+				Port:        "6379",
+				ClusterPort: "16379",
+			},
+			Flags: ClusterNodeFlags{
+				FlagMaster: true,
+				FlagMyself: true,
+			},
+			MasterID:     "",
+			PingSent:     0,
+			PongReceived: 0,
+			Epoch:        0,
+			LinkState:    LinkStateConnected,
+			Slots:        HashSlots{},
+		},
+	}
+
+	_, err := nodes.Self()
+
+	if err == nil {
+		t.Errorf("expected an error")
+	}
+}
+
+func TestClusterNodesSelfNone(t *testing.T) {
+	nodes := ClusterNodes{}
+
+	_, err := nodes.Self()
+
+	if err == nil {
+		t.Errorf("expected an error")
+	}
+}
+
+func TestClusterNodesSelf(t *testing.T) {
+	nodes := ClusterNodes{
+		ClusterNode{
+			ID: "a",
+			Address: ClusterNodeAddress{
+				IP:          net.ParseIP("127.0.0.2"),
+				Port:        "6379",
+				ClusterPort: "16379",
+			},
+			Flags: ClusterNodeFlags{
+				FlagHandshake: true,
+			},
+			MasterID:     "",
+			PingSent:     0,
+			PongReceived: 0,
+			Epoch:        0,
+			LinkState:    LinkStateConnected,
+			Slots:        HashSlots{},
+		},
+		ClusterNode{
+			ID: "b",
+			Address: ClusterNodeAddress{
+				IP:          net.ParseIP("127.0.0.2"),
+				Port:        "6379",
+				ClusterPort: "16379",
+			},
+			Flags: ClusterNodeFlags{
+				FlagMaster: true,
+				FlagMyself: true,
+			},
+			MasterID:     "",
+			PingSent:     0,
+			PongReceived: 0,
+			Epoch:        0,
+			LinkState:    LinkStateConnected,
+			Slots:        HashSlots{},
+		},
+	}
+
+	value, err := nodes.Self()
+
+	if err != nil {
+		t.Errorf("expected no error but got: %s", err)
+	}
+
+	expected := nodes[1]
+
+	if !reflect.DeepEqual(expected, value) {
+		t.Errorf("expected:\n%v\ngot:\n%v", expected, value)
 	}
 }
