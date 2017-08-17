@@ -225,7 +225,10 @@ func (d *Database) getMissingConnections(expectedConnections []Connection) (conn
 // GetOperations returns the operations that need to be performed in order for
 // the cluster to meet an acceptable state.
 func (d *Database) GetOperations() (operations []Operation) {
+	var leaderGroup MasterGroup
+
 	for _, masterGroup := range d.masterGroups {
+		leaderGroup = append(leaderGroup, masterGroup[0])
 		expectedConnections := d.getExpectedConnections(masterGroup)
 		missingConnections := d.getMissingConnections(expectedConnections)
 
@@ -235,6 +238,16 @@ func (d *Database) GetOperations() (operations []Operation) {
 				Other:  d.redisInstancesByID[connection.To],
 			})
 		}
+	}
+
+	expectedConnections := d.getExpectedConnections(leaderGroup)
+	missingConnections := d.getMissingConnections(expectedConnections)
+
+	for _, connection := range missingConnections {
+		operations = append(operations, MeetOperation{
+			Target: d.redisInstancesByID[connection.From],
+			Other:  d.redisInstancesByID[connection.To],
+		})
 	}
 
 	//for _, masterGroup := range d.masterGroups {
