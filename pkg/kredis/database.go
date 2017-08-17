@@ -11,9 +11,17 @@ type Database struct {
 	masterGroups                []MasterGroup
 	masterGroupsByRedisInstance map[RedisInstance]MasterGroup
 	redisInstancesByID          map[ClusterNodeID]RedisInstance
+	idByRedisInstance           map[RedisInstance]ClusterNodeID
 	nodesByID                   map[ClusterNodeID]ClusterNodes
 	masters                     []ClusterNodeID
 	slavesByID                  map[ClusterNodeID][]ClusterNodeID
+	connections                 []Connection
+}
+
+// A Connection represents a link from one node to the other.
+type Connection struct {
+	From ClusterNodeID
+	To   ClusterNodeID
 }
 
 // RegisterGroup registers a master group.
@@ -55,6 +63,7 @@ func (d *Database) Feed(redisInstance RedisInstance, nodes ClusterNodes) error {
 
 	if d.redisInstancesByID == nil {
 		d.redisInstancesByID = make(map[ClusterNodeID]RedisInstance)
+		d.idByRedisInstance = make(map[RedisInstance]ClusterNodeID)
 	} else if otherRedisInstance, ok := d.redisInstancesByID[selfNode.ID]; ok {
 		return fmt.Errorf("refusing to register %s for %s as it is already registered for %s", selfNode.ID, redisInstance, otherRedisInstance)
 	}
@@ -64,6 +73,13 @@ func (d *Database) Feed(redisInstance RedisInstance, nodes ClusterNodes) error {
 	}
 
 	for _, node := range nodes {
+		if node.ID != selfNode.ID {
+			d.connections = append(d.connections, Connection{
+				From: selfNode.ID,
+				To:   node.ID,
+			})
+		}
+
 		if node.Flags[FlagMaster] {
 			if err = d.addMaster(node.ID); err != nil {
 				return err
@@ -76,6 +92,7 @@ func (d *Database) Feed(redisInstance RedisInstance, nodes ClusterNodes) error {
 	}
 
 	d.redisInstancesByID[selfNode.ID] = redisInstance
+	d.idByRedisInstance[redisInstance] = selfNode.ID
 	d.nodesByID[selfNode.ID] = nodes
 
 	return nil
@@ -160,4 +177,80 @@ func (d *Database) addSlave(masterID, id ClusterNodeID) error {
 	d.slavesByID[masterID] = append(d.slavesByID[masterID], id)
 
 	return nil
+}
+
+// Operation represents a cluster operation.
+type Operation interface{}
+
+// A MeetOperation indicates that a node must meet another.
+type MeetOperation struct {
+	Target RedisInstance
+	Other  RedisInstance
+}
+
+func (d *Database) getExpectedConnections(masterGroup MasterGroup) (connections []Connection) {
+	for i, a := range masterGroup {
+		for j, b := range masterGroup {
+			if i != j {
+				connections = append(connections, Connection{
+					From: d.idByRedisInstance[a],
+					To:   d.idByRedisInstance[b],
+				})
+			}
+		}
+	}
+
+	return
+}
+
+func (d *Database) getMissingConnections(expectedConnections []Connection) (connections []Connection) {
+	for _, expectedConnection := range expectedConnections {
+		found := false
+
+		for _, connection := range d.connections {
+			if expectedConnection == connection {
+				found = true
+				break
+			}
+		}
+
+		if !found {
+			connections = append(connections, expectedConnection)
+		}
+	}
+
+	return
+}
+
+// GetOperations returns the operations that need to be performed in order for
+// the cluster to meet an acceptable state.
+func (d *Database) GetOperations() (operations []Operation) {
+	for _, masterGroup := range d.masterGroups {
+		expectedConnections := d.getExpectedConnections(masterGroup)
+		missingConnections := d.getMissingConnections(expectedConnections)
+
+		for _, connection := range missingConnections {
+			operations = append(operations, MeetOperation{
+				Target: d.redisInstancesByID[connection.From],
+				Other:  d.redisInstancesByID[connection.To],
+			})
+		}
+	}
+
+	//for _, masterGroup := range d.masterGroups {
+	//	var masters []redisInstance
+	//	var slaves []redisInstance
+
+	//	for _, redisInstance := range masterGroup {
+	//		id := d.idByRedisInstance[redisInstance]
+
+	//		if d.IsMaster(id) {
+	//			masters = append(masters, redisInstance)
+	//		} else {
+	//			slaves = append(slaves, redisInstance)
+	//		}
+	//	}
+	//}
+
+	return
 }

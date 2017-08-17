@@ -3,6 +3,7 @@ package kredis
 import (
 	"context"
 	"fmt"
+	"net"
 
 	"github.com/go-kit/kit/log"
 )
@@ -28,9 +29,22 @@ func (m *Manager) Run(ctx context.Context, masterGroups []MasterGroup) {
 
 	if err != nil {
 		m.logger.Log("event", "failed to build database", "error", err)
+	} else {
+		operations := db.GetOperations()
+
+		for _, operation := range operations {
+			switch operation := operation.(type) {
+			case MeetOperation:
+				m.logger.Log("event", "cluster meet", "target", operation.Target, "other", operation.Other)
+				err := m.ClusterMeet(ctx, operation.Target, operation.Other)
+
+				if err != nil {
+					m.logger.Log("event", "synchronization failure", "error", err)
+				}
+			}
+		}
 	}
 
-	m.logger.Log("event", "database built", "database", db)
 	<-ctx.Done()
 }
 
@@ -87,4 +101,27 @@ func (m *Manager) GetClusterNodes(ctx context.Context, redisInstance RedisInstan
 	}
 
 	return ParseClusterNodes(string(data.([]byte)))
+}
+
+// ClusterMeet causes a node to meet another one.
+func (m *Manager) ClusterMeet(ctx context.Context, redisInstance RedisInstance, other RedisInstance) (err error) {
+	defer func() {
+		if err != nil {
+			err = fmt.Errorf("asking %s to meet %s: %s", redisInstance, other, err)
+		}
+	}()
+
+	conn := m.pool.Get(redisInstance)
+	defer conn.Close()
+
+	var ipAddresses []net.IP
+	ipAddresses, err = net.LookupIP(other.Hostname)
+
+	if err != nil {
+		return
+	}
+
+	_, err = conn.Do("CLUSTER", "MEET", ipAddresses[0], other.Port)
+
+	return
 }
