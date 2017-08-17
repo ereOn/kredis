@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"time"
 
 	"github.com/go-kit/kit/log"
 )
@@ -11,41 +12,43 @@ import (
 // A Manager is responsible for the coordination of Redis instances inside a
 // MasterGroup.
 type Manager struct {
-	logger log.Logger
-	pool   *Pool
-}
-
-// NewManager instantiates a new Manager.
-func NewManager(logger log.Logger, pool *Pool) *Manager {
-	return &Manager{
-		logger: logger,
-		pool:   pool,
-	}
+	SyncPeriod time.Duration
+	Logger     log.Logger
+	Pool       *Pool
 }
 
 // Run the manager on the specified master groups until the context expires.
 func (m *Manager) Run(ctx context.Context, masterGroups []MasterGroup) {
-	db, err := m.BuildDatabase(ctx, masterGroups)
+	ticker := time.NewTicker(m.SyncPeriod)
+	defer ticker.Stop()
 
-	if err != nil {
-		m.logger.Log("event", "failed to build database", "error", err)
-	} else {
-		operations := db.GetOperations()
+	for {
+		db, err := m.BuildDatabase(ctx, masterGroups)
 
-		for _, operation := range operations {
-			switch operation := operation.(type) {
-			case MeetOperation:
-				m.logger.Log("event", "cluster meet", "target", operation.Target, "other", operation.Other)
-				err := m.ClusterMeet(ctx, operation.Target, operation.Other)
+		if err != nil {
+			m.Logger.Log("event", "failed to build database", "error", err)
+		} else {
+			operations := db.GetOperations()
 
-				if err != nil {
-					m.logger.Log("event", "synchronization failure", "error", err)
+			for _, operation := range operations {
+				switch operation := operation.(type) {
+				case MeetOperation:
+					m.Logger.Log("event", "cluster meet", "target", operation.Target, "other", operation.Other)
+					err := m.ClusterMeet(ctx, operation.Target, operation.Other)
+
+					if err != nil {
+						m.Logger.Log("event", "synchronization failure", "error", err)
+					}
 				}
 			}
 		}
-	}
 
-	<-ctx.Done()
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
 }
 
 // BuildDatabase build the cluster database by querying all the nodes.
@@ -90,7 +93,7 @@ func (m *Manager) GetClusterNodes(ctx context.Context, redisInstance RedisInstan
 		}
 	}()
 
-	conn := m.pool.Get(redisInstance)
+	conn := m.Pool.Get(redisInstance)
 	defer conn.Close()
 
 	var data interface{}
@@ -111,7 +114,7 @@ func (m *Manager) ClusterMeet(ctx context.Context, redisInstance RedisInstance, 
 		}
 	}()
 
-	conn := m.pool.Get(redisInstance)
+	conn := m.Pool.Get(redisInstance)
 	defer conn.Close()
 
 	var ipAddresses []net.IP
