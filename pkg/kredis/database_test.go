@@ -9,6 +9,7 @@ var (
 	riA    = RedisInstance{Hostname: "a"}
 	riB    = RedisInstance{Hostname: "b"}
 	riC    = RedisInstance{Hostname: "c"}
+	group  = MasterGroup{riA, riB, riC}
 	nodesA = mustParseClusterNodes(`
 a 1:1@1 master,myself - 0 0 0 connected
 b 1:1@1 slave a 0 0 0 connected
@@ -59,8 +60,43 @@ func mustParseClusterNodes(s string) ClusterNodes {
 	return nodes
 }
 
+func TestDatabaseRegisterGroupDuplicate(t *testing.T) {
+	database := &Database{}
+	err := database.RegisterGroup(MasterGroup{riA, riB})
+
+	if err != nil {
+		t.Errorf("expected no error but got: %s", err)
+	}
+
+	err = database.RegisterGroup(MasterGroup{riC, riB})
+
+	if err == nil {
+		t.Error("expected an error")
+	}
+}
+
+func TestDatabaseFeedNoMasterGroup(t *testing.T) {
+	database := &Database{}
+	err := database.Feed(riA, nodesA)
+
+	if err == nil {
+		t.Error("expected an error")
+	}
+}
+
+func TestDatabaseFeedNoMatchingMasterGroup(t *testing.T) {
+	database := &Database{}
+	database.RegisterGroup(MasterGroup{riB, riC})
+	err := database.Feed(riA, nodesA)
+
+	if err == nil {
+		t.Error("expected an error")
+	}
+}
+
 func TestDatabaseFeed(t *testing.T) {
 	database := &Database{}
+	database.RegisterGroup(group)
 	err := database.Feed(riA, nodesA)
 
 	if err != nil {
@@ -82,6 +118,7 @@ func TestDatabaseFeed(t *testing.T) {
 
 func TestDatabaseFeedMasterConflict(t *testing.T) {
 	database := &Database{}
+	database.RegisterGroup(group)
 	err := database.Feed(riA, nodesA)
 
 	if err != nil {
@@ -103,6 +140,7 @@ func TestDatabaseFeedMasterConflict(t *testing.T) {
 
 func TestDatabaseFeedSlaveConflict(t *testing.T) {
 	database := &Database{}
+	database.RegisterGroup(group)
 	err := database.Feed(riA, nodesAslave)
 
 	if err != nil {
@@ -118,6 +156,7 @@ func TestDatabaseFeedSlaveConflict(t *testing.T) {
 
 func TestDatabaseFeedDualSlaveConflict(t *testing.T) {
 	database := &Database{}
+	database.RegisterGroup(group)
 	err := database.Feed(riA, nodesA)
 
 	if err != nil {
@@ -133,6 +172,7 @@ func TestDatabaseFeedDualSlaveConflict(t *testing.T) {
 
 func TestDatabaseFeedMasterSlaveConflict(t *testing.T) {
 	database := &Database{}
+	database.RegisterGroup(group)
 	err := database.Feed(riC, nodesCconflict)
 
 	if err == nil {
@@ -142,6 +182,7 @@ func TestDatabaseFeedMasterSlaveConflict(t *testing.T) {
 
 func TestDatabaseFeedNoSelf(t *testing.T) {
 	database := &Database{}
+	database.RegisterGroup(group)
 	err := database.Feed(riC, nodesNoSelf)
 
 	if err == nil {
@@ -151,6 +192,7 @@ func TestDatabaseFeedNoSelf(t *testing.T) {
 
 func TestDatabaseFeedDualRedisInstance(t *testing.T) {
 	database := &Database{}
+	database.RegisterGroup(group)
 	_ = database.Feed(riC, nodesC)
 	err := database.Feed(riC, nodesC)
 
@@ -161,6 +203,7 @@ func TestDatabaseFeedDualRedisInstance(t *testing.T) {
 
 func TestDatabaseFeedDualRegistration(t *testing.T) {
 	database := &Database{}
+	database.RegisterGroup(group)
 	err := database.Feed(riC, nodesC)
 
 	if err != nil {

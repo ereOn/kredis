@@ -1,20 +1,52 @@
 package kredis
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 )
 
 // Database represents a cluster database.
 type Database struct {
-	redisInstancesByID map[ClusterNodeID]RedisInstance
-	nodesByID          map[ClusterNodeID]ClusterNodes
-	masters            []ClusterNodeID
-	slavesByID         map[ClusterNodeID][]ClusterNodeID
+	masterGroups                []MasterGroup
+	masterGroupsByRedisInstance map[RedisInstance]MasterGroup
+	redisInstancesByID          map[ClusterNodeID]RedisInstance
+	nodesByID                   map[ClusterNodeID]ClusterNodes
+	masters                     []ClusterNodeID
+	slavesByID                  map[ClusterNodeID][]ClusterNodeID
+}
+
+// RegisterGroup registers a master group.
+func (d *Database) RegisterGroup(masterGroup MasterGroup) error {
+	if d.masterGroupsByRedisInstance == nil {
+		d.masterGroupsByRedisInstance = make(map[RedisInstance]MasterGroup)
+	}
+
+	for _, redisInstance := range masterGroup {
+		if other, ok := d.masterGroupsByRedisInstance[redisInstance]; ok {
+			return fmt.Errorf("can't register master group %s because %s is already a member of %s", masterGroup, redisInstance, other)
+		}
+	}
+
+	for _, redisInstance := range masterGroup {
+		d.masterGroupsByRedisInstance[redisInstance] = masterGroup
+	}
+
+	d.masterGroups = append(d.masterGroups, masterGroup)
+
+	return nil
 }
 
 // Feed the database with new data.
 func (d *Database) Feed(redisInstance RedisInstance, nodes ClusterNodes) error {
+	if d.masterGroupsByRedisInstance == nil {
+		return errors.New("no master group was registered")
+	}
+
+	if _, ok := d.masterGroupsByRedisInstance[redisInstance]; !ok {
+		return fmt.Errorf("%s is not part of a registered master group", redisInstance)
+	}
+
 	selfNode, err := nodes.Self()
 
 	if err != nil {

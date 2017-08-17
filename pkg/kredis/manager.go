@@ -46,6 +46,10 @@ func (m *Manager) BuildDatabase(ctx context.Context, masterGroups []MasterGroup)
 	var nodes ClusterNodes
 
 	for _, masterGroup := range masterGroups {
+		if err = db.RegisterGroup(masterGroup); err != nil {
+			return
+		}
+
 		for _, redisInstance := range masterGroup {
 			nodes, err = m.GetClusterNodes(ctx, redisInstance)
 
