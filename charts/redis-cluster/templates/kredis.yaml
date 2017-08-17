@@ -13,6 +13,7 @@ spec:
     spec:
       containers:
       - name: kredis
+        imagePullPolicy: IfNotPresent
         image: ereon/kredis
         args:
 {{ range $shard := until (int $.Values.shards) }}
