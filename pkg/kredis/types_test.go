@@ -282,7 +282,7 @@ func TestParseClusterNodes(t *testing.T) {
 		{
 			`
 a 127.0.0.2:6379@16379 handshake - 0 0 0 connected
-b 127.0.0.2:6379@16379 master,myself - 0 0 0 connected
+b :6379 master,myself - 0 0 0 connected
 `,
 			ClusterNodes{
 				ClusterNode{
@@ -305,9 +305,9 @@ b 127.0.0.2:6379@16379 master,myself - 0 0 0 connected
 				ClusterNode{
 					ID: "b",
 					Address: ClusterNodeAddress{
-						IP:          net.ParseIP("127.0.0.2"),
+						IP:          nil,
 						Port:        "6379",
-						ClusterPort: "16379",
+						ClusterPort: "",
 					},
 					Flags: ClusterNodeFlags{
 						FlagMaster: true,
@@ -323,7 +323,7 @@ b 127.0.0.2:6379@16379 master,myself - 0 0 0 connected
 			},
 			`
 a 127.0.0.2:6379@16379 handshake - 0 0 0 connected
-b 127.0.0.2:6379@16379 master,myself - 0 0 0 connected
+b :6379 master,myself - 0 0 0 connected
 `,
 		},
 		{

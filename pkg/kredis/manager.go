@@ -31,6 +31,7 @@ func (m *Manager) Run(ctx context.Context, masterGroups []MasterGroup) {
 	}
 
 	m.logger.Log("event", "database built", "database", db)
+	<-ctx.Done()
 }
 
 // BuildDatabase build the cluster database by querying all the nodes.

@@ -9,11 +9,18 @@ metadata:
   name: {{ $.Release.Name }}-redis-{{ $shard }}
 spec:
   clusterIP: None
+  selector:
+    app: redis
+    shard: "{{ $shard }}"
   ports:
   - name: redis
     port: 6379
     protocol: TCP
     targetPort: 6379
+  - name: redis-cluster
+    port: 16379
+    protocol: TCP
+    targetPort: 16379
   type: ClusterIP
 ---
 apiVersion: apps/v1beta1

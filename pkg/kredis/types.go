@@ -111,26 +111,38 @@ type ClusterNodeAddress struct {
 	ClusterPort string
 }
 
-var clusterNodeAddressRegexp = regexp.MustCompile(`^([^:]+):([0-9]+)@([0-9]+)$`)
+var clusterNodeAddressRegexp = regexp.MustCompile(`^([^:]*):([0-9]*)(@([0-9]*))?$`)
 
 // ParseClusterNodeAddress parse a cluster node address.
 func ParseClusterNodeAddress(s string) (result ClusterNodeAddress, err error) {
 	matches := clusterNodeAddressRegexp.FindStringSubmatch(s)
 
-	if len(matches) != 4 {
+	if len(matches) != 5 {
 		err = fmt.Errorf("\"%s\" is not a valid cluster node address", s)
 		return
 	}
 
 	result.IP = net.ParseIP(matches[1])
 	result.Port = matches[2]
-	result.ClusterPort = matches[3]
+	result.ClusterPort = matches[4]
 
 	return
 }
 
 func (a ClusterNodeAddress) String() string {
-	return fmt.Sprintf("%s:%s@%s", a.IP, a.Port, a.ClusterPort)
+	buffer := &bytes.Buffer{}
+
+	if a.IP != nil {
+		fmt.Fprintf(buffer, "%s", a.IP)
+	}
+
+	fmt.Fprintf(buffer, ":%s", a.Port)
+
+	if a.ClusterPort != "" {
+		fmt.Fprintf(buffer, "@%s", a.ClusterPort)
+	}
+
+	return buffer.String()
 }
 
 // ClusterNodeFlag represents a cluster node flag.
