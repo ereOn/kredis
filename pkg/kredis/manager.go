@@ -39,6 +39,13 @@ func (m *Manager) Run(ctx context.Context, masterGroups []MasterGroup) {
 					if err != nil {
 						m.Logger.Log("event", "synchronization failure", "error", err)
 					}
+				case ReplicateOperation:
+					m.Logger.Log("event", "cluster replicate", "target", operation.Target, "master", operation.Master)
+					err := m.ClusterReplicate(ctx, operation.Target, operation.Master)
+
+					if err != nil {
+						m.Logger.Log("event", "synchronization failure", "error", err)
+					}
 				}
 			}
 		}
@@ -125,6 +132,22 @@ func (m *Manager) ClusterMeet(ctx context.Context, redisInstance RedisInstance, 
 	}
 
 	_, err = conn.Do("CLUSTER", "MEET", ipAddresses[0], other.Port)
+
+	return
+}
+
+// ClusterReplicate causes a node to replicate another one.
+func (m *Manager) ClusterReplicate(ctx context.Context, redisInstance RedisInstance, master ClusterNodeID) (err error) {
+	defer func() {
+		if err != nil {
+			err = fmt.Errorf("asking %s to replicate %s: %s", redisInstance, master, err)
+		}
+	}()
+
+	conn := m.Pool.Get(redisInstance)
+	defer conn.Close()
+
+	_, err = conn.Do("CLUSTER", "REPLICATE", master)
 
 	return
 }

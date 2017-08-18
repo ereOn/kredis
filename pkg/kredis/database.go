@@ -126,6 +126,17 @@ func (d *Database) IsSlave(id ClusterNodeID) ClusterNodeID {
 	return ""
 }
 
+// GetMasterOf gets the master of the specified node, if there is one.
+func (d *Database) GetMasterOf(id ClusterNodeID) ClusterNodeID {
+	if nodes, ok := d.nodesByID[id]; ok {
+		node, _ := nodes.Self()
+
+		return node.MasterID
+	}
+
+	return ""
+}
+
 func (d *Database) addMaster(id ClusterNodeID) error {
 	index := getClusterNodeIDsIndex(id, d.masters)
 
@@ -188,6 +199,12 @@ type MeetOperation struct {
 	Other  RedisInstance
 }
 
+// A ReplicateOperation indicates that a node must replicate another.
+type ReplicateOperation struct {
+	Target RedisInstance
+	Master ClusterNodeID
+}
+
 func (d *Database) getExpectedConnections(masterGroup MasterGroup) (connections []Connection) {
 	for i, a := range masterGroup {
 		for j, b := range masterGroup {
@@ -225,6 +242,7 @@ func (d *Database) getMissingConnections(expectedConnections []Connection) (conn
 // GetOperations returns the operations that need to be performed in order for
 // the cluster to meet an acceptable state.
 func (d *Database) GetOperations() (operations []Operation) {
+	// Cluster mesh.
 	var leaderGroup MasterGroup
 
 	for _, masterGroup := range d.masterGroups {
@@ -250,20 +268,49 @@ func (d *Database) GetOperations() (operations []Operation) {
 		})
 	}
 
-	//for _, masterGroup := range d.masterGroups {
-	//	var masters []redisInstance
-	//	var slaves []redisInstance
+	// Master/slave assignations.
+	for _, masterGroup := range d.masterGroups {
+		var masters []RedisInstance
+		var slaves []RedisInstance
 
-	//	for _, redisInstance := range masterGroup {
-	//		id := d.idByRedisInstance[redisInstance]
+		for _, redisInstance := range masterGroup {
+			id := d.idByRedisInstance[redisInstance]
 
-	//		if d.IsMaster(id) {
-	//			masters = append(masters, redisInstance)
-	//		} else {
-	//			slaves = append(slaves, redisInstance)
-	//		}
-	//	}
-	//}
+			if d.IsMaster(id) {
+				masters = append(masters, redisInstance)
+			} else {
+				slaves = append(slaves, redisInstance)
+			}
+		}
+
+		switch len(masters) {
+		case 0:
+			// No masters. This is weird: let it stabilize.
+		case 1:
+			// One master. This is expected. Do nothing.
+		default:
+			// More than one master: we need to demote some to slave.
+			var master RedisInstance = masters[0]
+
+			for _, slave := range slaves {
+				nodeID := d.GetMasterOf(d.idByRedisInstance[slave])
+
+				if nodeID != "" {
+					master = d.redisInstancesByID[nodeID]
+					break
+				}
+			}
+
+			for _, slave := range masters {
+				if slave != master {
+					operations = append(operations, ReplicateOperation{
+						Target: slave,
+						Master: d.idByRedisInstance[masters[0]],
+					})
+				}
+			}
+		}
+	}
 
 	return
 }
