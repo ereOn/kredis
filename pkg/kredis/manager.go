@@ -23,53 +23,48 @@ func (m *Manager) Run(ctx context.Context, masterGroups []MasterGroup) {
 	ticker := time.NewTicker(m.SyncPeriod)
 	defer ticker.Stop()
 
-	zero := time.Time{}
-	lastFailure := zero
-	var errors []error
+	errorFeed := &ErrorFeed{
+		Threshold: m.WarningPeriodThreshold,
+	}
 
 	for {
-		db, err := m.BuildDatabase(ctx, masterGroups)
+		var err error
+		var db *Database
+
+		db, err = m.BuildDatabase(ctx, masterGroups)
 
 		if err != nil {
-			now := time.Now().UTC()
-
-			if lastFailure == zero {
-				lastFailure = now
-				errors = []error{err}
-			} else if now.After(lastFailure.Add(m.WarningPeriodThreshold)) {
-				lastFailure = now
-				errors = append(errors, err)
-
-				m.Logger.Log("event", "synchronization errors", "errors-count", len(errors))
-
-				for i, err := range errors {
-					m.Logger.Log("event", "synchronization error", "error-index", i, "error", err)
-				}
-
-				errors = nil
-			}
+			errorFeed.Add(err)
 		} else {
-			lastFailure = zero
-			errors = nil
 			operations := db.GetOperations()
 
 			for _, operation := range operations {
 				switch operation := operation.(type) {
 				case MeetOperation:
 					m.Logger.Log("event", "cluster meet", "target", operation.Target, "other", operation.Other)
-					err := m.ClusterMeet(ctx, operation.Target, operation.Other)
+					err = m.ClusterMeet(ctx, operation.Target, operation.Other)
 
 					if err != nil {
-						m.Logger.Log("event", "synchronization failure", "error", err)
+						errorFeed.Add(err)
 					}
 				case ReplicateOperation:
 					m.Logger.Log("event", "cluster replicate", "target", operation.Target, "master", operation.Master)
-					err := m.ClusterReplicate(ctx, operation.Target, operation.MasterID)
+					err = m.ClusterReplicate(ctx, operation.Target, operation.MasterID)
 
 					if err != nil {
-						m.Logger.Log("event", "synchronization failure", "error", err)
+						errorFeed.Add(err)
 					}
 				}
+			}
+		}
+
+		if err == nil {
+			errorFeed.Reset()
+		} else if errors := errorFeed.PopErrors(); len(errors) != 0 {
+			m.Logger.Log("event", "synchronization errors", "errors-count", len(errors))
+
+			for i, err := range errors {
+				m.Logger.Log("event", "synchronization error", "error-index", i, "error", err)
 			}
 		}
 
