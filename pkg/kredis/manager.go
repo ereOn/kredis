@@ -12,9 +12,10 @@ import (
 // A Manager is responsible for the coordination of Redis instances inside a
 // MasterGroup.
 type Manager struct {
-	SyncPeriod time.Duration
-	Logger     log.Logger
-	Pool       *Pool
+	SyncPeriod             time.Duration
+	WarningPeriodThreshold time.Duration
+	Logger                 log.Logger
+	Pool                   *Pool
 }
 
 // Run the manager on the specified master groups until the context expires.
@@ -22,12 +23,34 @@ func (m *Manager) Run(ctx context.Context, masterGroups []MasterGroup) {
 	ticker := time.NewTicker(m.SyncPeriod)
 	defer ticker.Stop()
 
+	zero := time.Time{}
+	lastFailure := zero
+	var errors []error
+
 	for {
 		db, err := m.BuildDatabase(ctx, masterGroups)
 
 		if err != nil {
-			m.Logger.Log("event", "failed to build database", "error", err)
+			now := time.Now().UTC()
+
+			if lastFailure == zero {
+				lastFailure = now
+				errors = []error{err}
+			} else if now.After(lastFailure.Add(m.WarningPeriodThreshold)) {
+				lastFailure = now
+				errors = append(errors, err)
+
+				m.Logger.Log("event", "synchronization errors", "errors-count", len(errors))
+
+				for i, err := range errors {
+					m.Logger.Log("event", "synchronization error", "error-index", i, "error", err)
+				}
+
+				errors = nil
+			}
 		} else {
+			lastFailure = zero
+			errors = nil
 			operations := db.GetOperations()
 
 			for _, operation := range operations {
@@ -41,7 +64,7 @@ func (m *Manager) Run(ctx context.Context, masterGroups []MasterGroup) {
 					}
 				case ReplicateOperation:
 					m.Logger.Log("event", "cluster replicate", "target", operation.Target, "master", operation.Master)
-					err := m.ClusterReplicate(ctx, operation.Target, operation.Master)
+					err := m.ClusterReplicate(ctx, operation.Target, operation.MasterID)
 
 					if err != nil {
 						m.Logger.Log("event", "synchronization failure", "error", err)

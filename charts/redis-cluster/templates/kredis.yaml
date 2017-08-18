@@ -17,5 +17,5 @@ spec:
         image: ereon/kredis
         args:
 {{ range $shard := until (int $.Values.shards) }}
-        - "{{ range $instance := until (int $.Values.instances) }}{{ if gt $instance 0 }},{{ end }}{{ $.Release.Name }}-redis-{{ $shard }}-{{ $instance }}.{{ $.Release.Name }}-redis-{{ $shard }}{{ end }}"
+        - "{{ range $instance := until (int $.Values.instances) }}{{ if gt $instance 0 }},{{ end }}{{ $.Release.Name }}-redis-{{ add (mul $shard $.Values.instances) $instance }}.{{ $.Release.Name }}-redis{{ end }}"
 {{ end }}

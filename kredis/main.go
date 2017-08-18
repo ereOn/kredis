@@ -69,9 +69,10 @@ var rootCmd = &cobra.Command{
 		defer pool.Close()
 
 		manager := &kredis.Manager{
-			Logger:     logger,
-			Pool:       pool,
-			SyncPeriod: time.Second,
+			Logger:                 logger,
+			Pool:                   pool,
+			SyncPeriod:             time.Second,
+			WarningPeriodThreshold: time.Second * 5,
 		}
 
 		logger.Log("event", "started")

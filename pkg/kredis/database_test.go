@@ -44,6 +44,10 @@ c 1:1@1 myself,master - 0 0 0 connected
 c 1:1@1 myself,slave b 0 0 0 connected
 a 1:1@1 slave c 0 0 0 connected
 	`)
+	nodesCslaveOfNone = mustParseClusterNodes(`
+c 1:1@1 myself,slave - 0 0 0 connected
+a 1:1@1 slave c 0 0 0 connected
+	`)
 	nodesNoSelf = mustParseClusterNodes(`
 c 1:1@1 slave b 0 0 0 connected
 a 1:1@1 slave c 0 0 0 connected
@@ -174,6 +178,16 @@ func TestDatabaseFeedMasterSlaveConflict(t *testing.T) {
 	database := &Database{}
 	database.RegisterGroup(group)
 	err := database.Feed(riC, nodesCconflict)
+
+	if err == nil {
+		t.Error("expected an error")
+	}
+}
+
+func TestDatabaseFeedSlaveOfNone(t *testing.T) {
+	database := &Database{}
+	database.RegisterGroup(group)
+	err := database.Feed(riC, nodesCslaveOfNone)
 
 	if err == nil {
 		t.Error("expected an error")

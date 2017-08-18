@@ -46,6 +46,9 @@ func (d *Database) RegisterGroup(masterGroup MasterGroup) error {
 }
 
 // Feed the database with new data.
+//
+// If the feeding would lead to a database inconsistency, an error is returned
+// and the Database instance should be discarded.
 func (d *Database) Feed(redisInstance RedisInstance, nodes ClusterNodes) error {
 	if d.masterGroupsByRedisInstance == nil {
 		return errors.New("no master group was registered")
@@ -160,6 +163,10 @@ func (d *Database) addMaster(id ClusterNodeID) error {
 }
 
 func (d *Database) addSlave(masterID, id ClusterNodeID) error {
+	if masterID == "" {
+		return fmt.Errorf("refusing to register %s as slave because he just started replication with a master", id)
+	}
+
 	if d.IsMaster(id) {
 		return fmt.Errorf("refusing to register %s as slave of %s because he is a master", id, masterID)
 	}
@@ -201,8 +208,9 @@ type MeetOperation struct {
 
 // A ReplicateOperation indicates that a node must replicate another.
 type ReplicateOperation struct {
-	Target RedisInstance
-	Master ClusterNodeID
+	Target   RedisInstance
+	Master   RedisInstance
+	MasterID ClusterNodeID
 }
 
 func (d *Database) getExpectedConnections(masterGroup MasterGroup) (connections []Connection) {
@@ -304,8 +312,9 @@ func (d *Database) GetOperations() (operations []Operation) {
 			for _, slave := range masters {
 				if slave != master {
 					operations = append(operations, ReplicateOperation{
-						Target: slave,
-						Master: d.idByRedisInstance[masters[0]],
+						Target:   slave,
+						Master:   masters[0],
+						MasterID: d.idByRedisInstance[masters[0]],
 					})
 				}
 			}

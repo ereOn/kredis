@@ -1,17 +1,13 @@
-{{ range $shard := until (int $.Values.shards) }}
----
 apiVersion: v1
 kind: Service
 metadata:
   labels:
     app: redis
-    shard: "{{ $shard }}"
-  name: {{ $.Release.Name }}-redis-{{ $shard }}
+  name: {{ $.Release.Name }}-redis
 spec:
   clusterIP: None
   selector:
     app: redis
-    shard: "{{ $shard }}"
   ports:
   - name: redis
     port: 6379
@@ -28,17 +24,15 @@ kind: StatefulSet
 metadata:
   labels:
     app: redis
-    shard: "{{ $shard }}"
-  name: {{ $.Release.Name }}-redis-{{ $shard }}
+  name: {{ $.Release.Name }}-redis
 spec:
-  replicas: {{ $.Values.instances }}
+  replicas: {{ mul $.Values.shards $.Values.instances }}
   revisionHistoryLimit: 10
-  serviceName: {{ $.Release.Name }}-redis-{{ $shard }}
+  serviceName: {{ $.Release.Name }}-redis
   template:
     metadata:
       labels:
         app: redis
-        shard: "{{ $shard }}"
     spec:
       containers:
       - name: redis
@@ -87,7 +81,6 @@ spec:
       resources:
         requests:
           storage: 100Mi
-{{ end }}
 ---
 apiVersion: v1
 kind: ConfigMap
