@@ -206,6 +206,12 @@ type MeetOperation struct {
 	Other  RedisInstance
 }
 
+// A ForgetOperation indicates that a node must be forgotten.
+type ForgetOperation struct {
+	Target RedisInstance
+	NodeID ClusterNodeID
+}
+
 // A ReplicateOperation indicates that a node must replicate another.
 type ReplicateOperation struct {
 	Target   RedisInstance
@@ -274,6 +280,17 @@ func (d *Database) GetOperations() (operations []Operation) {
 			Target: d.redisInstancesByID[connection.From],
 			Other:  d.redisInstancesByID[connection.To],
 		})
+	}
+
+	for nodeID, nodes := range d.nodesByID {
+		for _, node := range nodes {
+			if _, ok := d.nodesByID[node.ID]; !ok {
+				operations = append(operations, ForgetOperation{
+					Target: d.redisInstancesByID[nodeID],
+					NodeID: node.ID,
+				})
+			}
+		}
 	}
 
 	// Master/slave assignations.

@@ -47,6 +47,13 @@ func (m *Manager) Run(ctx context.Context, masterGroups []MasterGroup) {
 					if err != nil {
 						errorFeed.Add(err)
 					}
+				case ForgetOperation:
+					m.Logger.Log("event", "cluster forget", "target", operation.Target, "node-id", operation.NodeID)
+					err = m.ClusterForget(ctx, operation.Target, operation.NodeID)
+
+					if err != nil {
+						errorFeed.Add(err)
+					}
 				case ReplicateOperation:
 					m.Logger.Log("event", "cluster replicate", "target", operation.Target, "master", operation.Master)
 					err = m.ClusterReplicate(ctx, operation.Target, operation.MasterID)
@@ -150,6 +157,22 @@ func (m *Manager) ClusterMeet(ctx context.Context, redisInstance RedisInstance, 
 	}
 
 	_, err = conn.Do("CLUSTER", "MEET", ipAddresses[0], other.Port)
+
+	return
+}
+
+// ClusterForget causes a node to forget another one.
+func (m *Manager) ClusterForget(ctx context.Context, redisInstance RedisInstance, nodeID ClusterNodeID) (err error) {
+	defer func() {
+		if err != nil {
+			err = fmt.Errorf("asking %s to forget %s: %s", redisInstance, nodeID, err)
+		}
+	}()
+
+	conn := m.Pool.Get(redisInstance)
+	defer conn.Close()
+
+	_, err = conn.Do("CLUSTER", "FORGET", nodeID)
 
 	return
 }
