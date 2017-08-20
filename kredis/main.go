@@ -72,7 +72,7 @@ var rootCmd = &cobra.Command{
 			Logger:                 logger,
 			Pool:                   pool,
 			SyncPeriod:             time.Second,
-			WarningPeriodThreshold: time.Second * 5,
+			WarningPeriodThreshold: time.Second * 10,
 			MaxSlots:               100,
 		}
 

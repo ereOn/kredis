@@ -9,6 +9,25 @@ import (
 	"github.com/go-kit/kit/log"
 )
 
+// ManagerState represents a state for the manager.
+type ManagerState string
+
+const (
+	// ManagerStateDNSResolution indicates that the manager is waiting for all
+	// its master groups addresses to resolve.
+	ManagerStateDNSResolution = "dns-resolution"
+	// ManagerStateMesh indicates that the manager is establishing the mesh.
+	ManagerStateMesh = "mesh"
+	// ManagerStateReplication indicates that the manager is setting-up
+	// replication.
+	ManagerStateReplication = "replication"
+	// ManagerStateAssignation indicates that the manager is setting-up slots
+	// assignations.
+	ManagerStateAssignation = "assignation"
+	// ManagerStateStable indicates that the cluster is stable.
+	ManagerStateStable = "stable"
+)
+
 // A Manager is responsible for the coordination of Redis instances inside a
 // MasterGroup.
 type Manager struct {
@@ -17,6 +36,14 @@ type Manager struct {
 	Logger                 log.Logger
 	Pool                   *Pool
 	MaxSlots               int
+	state                  ManagerState
+}
+
+func (m *Manager) setState(state ManagerState) {
+	if m.state != state {
+		m.state = state
+		m.Logger.Log("event", "state changed", "state", state)
+	}
 }
 
 // Run the manager on the specified master groups until the context expires.
@@ -27,6 +54,8 @@ func (m *Manager) Run(ctx context.Context, masterGroups []MasterGroup) {
 	errorFeed := &ErrorFeed{
 		Threshold: m.WarningPeriodThreshold,
 	}
+
+	m.setState(ManagerStateDNSResolution)
 
 	for {
 		var err error
@@ -39,37 +68,45 @@ func (m *Manager) Run(ctx context.Context, masterGroups []MasterGroup) {
 		} else {
 			operations := db.GetOperations()
 
-			for _, operation := range operations {
-				switch operation := operation.(type) {
-				case MeetOperation:
-					m.Logger.Log("event", "cluster meet", "target", operation.Target, "other", operation.Other)
-					err = m.ClusterMeet(ctx, operation.Target, operation.Other)
+			if len(operations) > 0 {
+				for _, operation := range operations {
+					switch operation := operation.(type) {
+					case MeetOperation:
+						m.setState(ManagerStateMesh)
+						m.Logger.Log("event", "cluster meet", "target", operation.Target, "other", operation.Other)
+						err = m.ClusterMeet(ctx, operation.Target, operation.Other)
 
-					if err != nil {
-						errorFeed.Add(err)
-					}
-				case ForgetOperation:
-					m.Logger.Log("event", "cluster forget", "target", operation.Target, "node-id", operation.NodeID)
-					err = m.ClusterForget(ctx, operation.Target, operation.NodeID)
+						if err != nil {
+							errorFeed.Add(err)
+						}
+					case ForgetOperation:
+						m.setState(ManagerStateMesh)
+						m.Logger.Log("event", "cluster forget", "target", operation.Target, "node-id", operation.NodeID)
+						err = m.ClusterForget(ctx, operation.Target, operation.NodeID)
 
-					if err != nil {
-						errorFeed.Add(err)
-					}
-				case ReplicateOperation:
-					m.Logger.Log("event", "cluster replicate", "target", operation.Target, "master", operation.Master)
-					err = m.ClusterReplicate(ctx, operation.Target, operation.MasterID)
+						if err != nil {
+							errorFeed.Add(err)
+						}
+					case ReplicateOperation:
+						m.setState(ManagerStateReplication)
+						m.Logger.Log("event", "cluster replicate", "target", operation.Target, "master", operation.Master)
+						err = m.ClusterReplicate(ctx, operation.Target, operation.MasterID)
 
-					if err != nil {
-						errorFeed.Add(err)
-					}
-				case AddSlotsOperation:
-					m.Logger.Log("event", "cluster add slots", "target", operation.Target, "slots", operation.Slots)
-					err = m.ClusterAddSlots(ctx, operation.Target, operation.Slots)
+						if err != nil {
+							errorFeed.Add(err)
+						}
+					case AddSlotsOperation:
+						m.setState(ManagerStateAssignation)
+						m.Logger.Log("event", "cluster add slots", "target", operation.Target, "slots", operation.Slots)
+						err = m.ClusterAddSlots(ctx, operation.Target, operation.Slots)
 
-					if err != nil {
-						errorFeed.Add(err)
+						if err != nil {
+							errorFeed.Add(err)
+						}
 					}
 				}
+			} else {
+				m.setState(ManagerStateStable)
 			}
 		}
 
