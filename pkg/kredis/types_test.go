@@ -476,3 +476,33 @@ func TestClusterNodesSelf(t *testing.T) {
 		t.Errorf("expected:\n%v\ngot:\n%v", expected, value)
 	}
 }
+
+func TestHashSlotsString(t *testing.T) {
+	slots := NewHashSlotsFromRange(4, 17, 1)
+	value := slots.String()
+	expected := "4-17"
+
+	if expected != value {
+		t.Errorf("expected: \"%s\", ngot\"%s\"", expected, value)
+	}
+}
+
+func TestHashSlotsStringInterval(t *testing.T) {
+	slots := NewHashSlotsFromRange(4, 17, 3)
+	value := slots.String()
+	expected := "4 7 10 13 16"
+
+	if expected != value {
+		t.Errorf("expected: \"%s\", ngot\"%s\"", expected, value)
+	}
+}
+
+func TestHashSlotsStringEmpty(t *testing.T) {
+	slots := HashSlots{}
+	value := slots.String()
+	expected := ""
+
+	if expected != value {
+		t.Errorf("expected: \"%s\", ngot\"%s\"", expected, value)
+	}
+}

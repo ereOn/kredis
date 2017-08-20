@@ -1,6 +1,7 @@
 package kredis
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -11,7 +12,7 @@ var (
 	riC    = RedisInstance{Hostname: "c"}
 	group  = MasterGroup{riA, riB, riC}
 	nodesA = mustParseClusterNodes(`
-a 1:1@1 master,myself - 0 0 0 connected
+a 1:1@1 master,myself - 0 0 0 connected 1 2 3
 b 1:1@1 slave a 0 0 0 connected
 c 1:1@1 slave a 0 0 0 connected
 	`)
@@ -62,6 +63,30 @@ func mustParseClusterNodes(s string) ClusterNodes {
 	}
 
 	return nodes
+}
+
+func compareOperations(expected []Operation, operations []Operation) bool {
+	if len(expected) != len(operations) {
+		return false
+	}
+
+	for _, expectedOperation := range expected {
+		found := false
+
+		for j, operation := range operations {
+			if reflect.DeepEqual(expectedOperation, operation) {
+				operations = append(operations[:j], operations[j+1:]...)
+				found = true
+				break
+			}
+		}
+
+		if !found {
+			return false
+		}
+	}
+
+	return true
 }
 
 func TestDatabaseRegisterGroupDuplicate(t *testing.T) {
@@ -228,5 +253,336 @@ func TestDatabaseFeedDualRegistration(t *testing.T) {
 
 	if err == nil {
 		t.Error("expected an error")
+	}
+}
+
+func TestDatabaseGetMasterOfNoMaster(t *testing.T) {
+	database := &Database{}
+	database.RegisterGroup(MasterGroup{riA, riB})
+	database.Feed(riA, mustParseClusterNodes(`a 1:1@1 master,myself - 0 0 0 connected`))
+	database.Feed(riB, mustParseClusterNodes(`b 1:1@1 master,myself - 0 0 0 connected`))
+	value := database.GetMasterOf("a")
+	var expected ClusterNodeID
+
+	if value != expected {
+		t.Errorf("expected \"%s\", got \"%s\"", expected, value)
+	}
+}
+
+func TestDatabaseGetMasterOfUnknown(t *testing.T) {
+	database := &Database{}
+	database.RegisterGroup(MasterGroup{riA, riB})
+	database.Feed(riA, mustParseClusterNodes(`a 1:1@1 master,myself - 0 0 0 connected`))
+	database.Feed(riB, mustParseClusterNodes(`b 1:1@1 master,myself - 0 0 0 connected`))
+	value := database.GetMasterOf("c")
+	var expected ClusterNodeID
+
+	if value != expected {
+		t.Errorf("expected \"%s\", got \"%s\"", expected, value)
+	}
+}
+
+func TestDatabaseGetOperationsMesh(t *testing.T) {
+	database := &Database{}
+	database.RegisterGroup(group)
+	database.Feed(riA, mustParseClusterNodes(`a 1:1@1 master,myself - 0 0 0 connected`))
+	database.Feed(riB, mustParseClusterNodes(`b 1:1@1 master,myself - 0 0 0 connected`))
+	database.Feed(riC, mustParseClusterNodes(`c 1:1@1 master,myself - 0 0 0 connected`))
+	operations := database.GetOperations()
+	expected := []Operation{
+		MeetOperation{
+			Target: riA,
+			Other:  riB,
+		},
+		MeetOperation{
+			Target: riA,
+			Other:  riC,
+		},
+		MeetOperation{
+			Target: riB,
+			Other:  riA,
+		},
+		MeetOperation{
+			Target: riB,
+			Other:  riC,
+		},
+		MeetOperation{
+			Target: riC,
+			Other:  riA,
+		},
+		MeetOperation{
+			Target: riC,
+			Other:  riB,
+		},
+	}
+
+	if !compareOperations(expected, operations) {
+		t.Errorf("expected:\n%v\ngot:\n%v", expected, operations)
+	}
+}
+
+func TestDatabaseGetOperationsMeshLeaders(t *testing.T) {
+	database := &Database{}
+	database.RegisterGroup(MasterGroup{riA})
+	database.RegisterGroup(MasterGroup{riB})
+	database.RegisterGroup(MasterGroup{riC})
+	database.Feed(riA, mustParseClusterNodes(`a 1:1@1 master,myself - 0 0 0 connected`))
+	database.Feed(riB, mustParseClusterNodes(`b 1:1@1 master,myself - 0 0 0 connected`))
+	database.Feed(riC, mustParseClusterNodes(`c 1:1@1 master,myself - 0 0 0 connected`))
+	operations := database.GetOperations()
+	expected := []Operation{
+		MeetOperation{
+			Target: riA,
+			Other:  riB,
+		},
+		MeetOperation{
+			Target: riA,
+			Other:  riC,
+		},
+		MeetOperation{
+			Target: riB,
+			Other:  riA,
+		},
+		MeetOperation{
+			Target: riB,
+			Other:  riC,
+		},
+		MeetOperation{
+			Target: riC,
+			Other:  riA,
+		},
+		MeetOperation{
+			Target: riC,
+			Other:  riB,
+		},
+	}
+
+	if !compareOperations(expected, operations) {
+		t.Errorf("expected:\n%v\ngot:\n%v", expected, operations)
+	}
+}
+
+func TestDatabaseGetOperationsMeshScaleDown(t *testing.T) {
+	database := &Database{}
+	database.RegisterGroup(MasterGroup{riA, riB})
+	database.Feed(riA, mustParseClusterNodes(`
+a 1:1@1 master,myself - 0 0 0 connected
+b 1:1@1 master - 0 0 0 connected
+c 1:1@1 master - 0 0 0 connected
+`))
+	database.Feed(riB, mustParseClusterNodes(`
+a 1:1@1 master - 0 0 0 connected
+b 1:1@1 master,myself - 0 0 0 connected
+c 1:1@1 master - 0 0 0 connected
+`))
+	operations := database.GetOperations()
+	expected := []Operation{
+		ForgetOperation{
+			Target: riA,
+			NodeID: "c",
+		},
+		ForgetOperation{
+			Target: riB,
+			NodeID: "c",
+		},
+	}
+
+	if !compareOperations(expected, operations) {
+		t.Errorf("expected:\n%v\ngot:\n%v", expected, operations)
+	}
+}
+
+func TestDatabaseGetOperationsReplication(t *testing.T) {
+	database := &Database{}
+	database.RegisterGroup(group)
+	database.Feed(riA, mustParseClusterNodes(`
+a 1:1@1 master,myself - 0 0 0 connected
+b 1:1@1 master - 0 0 0 connected
+c 1:1@1 master - 0 0 0 connected
+`))
+	database.Feed(riB, mustParseClusterNodes(`
+a 1:1@1 master - 0 0 0 connected
+b 1:1@1 master,myself - 0 0 0 connected
+c 1:1@1 master - 0 0 0 connected
+`))
+	database.Feed(riC, mustParseClusterNodes(`
+a 1:1@1 master - 0 0 0 connected
+b 1:1@1 master - 0 0 0 connected
+c 1:1@1 master,myself - 0 0 0 connected
+`))
+	operations := database.GetOperations()
+	expected := []Operation{
+		ReplicateOperation{
+			Target:   riB,
+			Master:   riA,
+			MasterID: "a",
+		},
+		ReplicateOperation{
+			Target:   riC,
+			Master:   riA,
+			MasterID: "a",
+		},
+	}
+
+	if !compareOperations(expected, operations) {
+		t.Errorf("expected:\n%v\ngot:\n%v", expected, operations)
+	}
+}
+
+func TestDatabaseGetOperationsReplicationExistingMaster(t *testing.T) {
+	database := &Database{}
+	database.RegisterGroup(group)
+	database.Feed(riA, mustParseClusterNodes(`
+a 1:1@1 slave,myself b 0 0 0 connected
+b 1:1@1 master - 0 0 0 connected
+c 1:1@1 master - 0 0 0 connected
+`))
+	database.Feed(riB, mustParseClusterNodes(`
+a 1:1@1 slave b 0 0 0 connected
+b 1:1@1 master,myself - 0 0 0 connected
+c 1:1@1 master - 0 0 0 connected
+`))
+	database.Feed(riC, mustParseClusterNodes(`
+a 1:1@1 slave b 0 0 0 connected
+b 1:1@1 master - 0 0 0 connected
+c 1:1@1 master,myself - 0 0 0 connected
+`))
+	operations := database.GetOperations()
+	expected := []Operation{
+		ReplicateOperation{
+			Target:   riC,
+			Master:   riB,
+			MasterID: "b",
+		},
+	}
+
+	if !compareOperations(expected, operations) {
+		t.Errorf("expected:\n%v\ngot:\n%v", expected, operations)
+	}
+}
+
+func TestDatabaseGetOperationsReplicationExistingUnknownMaster(t *testing.T) {
+	database := &Database{}
+	database.RegisterGroup(group)
+	database.Feed(riA, mustParseClusterNodes(`
+a 1:1@1 slave,myself d 0 0 0 connected
+b 1:1@1 master - 0 0 0 connected
+c 1:1@1 master - 0 0 0 connected
+`))
+	database.Feed(riB, mustParseClusterNodes(`
+a 1:1@1 slave d 0 0 0 connected
+b 1:1@1 master,myself - 0 0 0 connected
+c 1:1@1 master - 0 0 0 connected
+`))
+	database.Feed(riC, mustParseClusterNodes(`
+a 1:1@1 slave d 0 0 0 connected
+b 1:1@1 master - 0 0 0 connected
+c 1:1@1 master,myself - 0 0 0 connected
+`))
+	operations := database.GetOperations()
+	expected := []Operation{
+		ReplicateOperation{
+			Target:   riC,
+			Master:   riB,
+			MasterID: "b",
+		},
+		ReplicateOperation{
+			Target:   riA,
+			Master:   riB,
+			MasterID: "b",
+		},
+	}
+
+	if !compareOperations(expected, operations) {
+		t.Errorf("expected:\n%v\ngot:\n%v", expected, operations)
+	}
+}
+
+func TestDatabaseGetOperationsAssignationSingleGroup(t *testing.T) {
+	database := &Database{ManagedSlots: AllSlots}
+	database.RegisterGroup(group)
+	database.Feed(riA, mustParseClusterNodes(`
+a 1:1@1 master,myself - 0 0 0 connected
+b 1:1@1 slave a 0 0 0 connected
+c 1:1@1 slave a 0 0 0 connected
+`))
+	database.Feed(riB, mustParseClusterNodes(`
+a 1:1@1 master - 0 0 0 connected
+b 1:1@1 slave,myself a 0 0 0 connected
+c 1:1@1 slave a 0 0 0 connected
+`))
+	database.Feed(riC, mustParseClusterNodes(`
+a 1:1@1 master - 0 0 0 connected
+b 1:1@1 slave a 0 0 0 connected
+c 1:1@1 slave,myself a 0 0 0 connected
+`))
+	operations := database.GetOperations()
+	expected := []Operation{
+		AddSlotsOperation{
+			Target: riA,
+			Slots:  NewHashSlotsFromRange(0, SlotsCount-1, 1),
+		},
+	}
+
+	if !compareOperations(expected, operations) {
+		t.Errorf("expected:\n%v\ngot:\n%v", expected, operations)
+	}
+}
+
+func TestDatabaseGetOperationsAssignation(t *testing.T) {
+	database := &Database{ManagedSlots: AllSlots}
+	database.RegisterGroup(MasterGroup{riA})
+	database.RegisterGroup(MasterGroup{riB})
+	database.Feed(riA, mustParseClusterNodes(`
+a 1:1@1 master,myself - 0 0 0 connected
+b 1:1@1 master - 0 0 0 connected
+`))
+	database.Feed(riB, mustParseClusterNodes(`
+a 1:1@1 master - 0 0 0 connected
+b 1:1@1 master,myself - 0 0 0 connected
+`))
+	operations := database.GetOperations()
+	expected := []Operation{
+		AddSlotsOperation{
+			Target: riA,
+			Slots:  NewHashSlotsFromRange(0, SlotsCount-1, 2),
+		},
+		AddSlotsOperation{
+			Target: riB,
+			Slots:  NewHashSlotsFromRange(1, SlotsCount-1, 2),
+		},
+	}
+
+	if !compareOperations(expected, operations) {
+		t.Errorf("expected:\n%v\ngot:\n%v", expected, operations)
+	}
+}
+
+func TestDatabaseGetOperationsAssignationPreAssigned(t *testing.T) {
+	database := &Database{ManagedSlots: NewHashSlotsFromRange(0, 10, 1)}
+	database.RegisterGroup(MasterGroup{riA})
+	database.RegisterGroup(MasterGroup{riB})
+	database.Feed(riA, mustParseClusterNodes(`
+a 1:1@1 master,myself - 0 0 0 connected 0 2 4
+b 1:1@1 master - 0 0 0 connected 1 3 5
+`))
+	database.Feed(riB, mustParseClusterNodes(`
+a 1:1@1 master - 0 0 0 connected 0 2 4
+b 1:1@1 master,myself - 0 0 0 connected 1 3 5
+`))
+	operations := database.GetOperations()
+	expected := []Operation{
+		AddSlotsOperation{
+			Target: riA,
+			Slots:  NewHashSlotsFromRange(6, 10, 2),
+		},
+		AddSlotsOperation{
+			Target: riB,
+			Slots:  NewHashSlotsFromRange(7, 10, 2),
+		},
+	}
+
+	if !compareOperations(expected, operations) {
+		t.Errorf("expected:\n%v\ngot:\n%v", expected, operations)
 	}
 }

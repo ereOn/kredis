@@ -222,7 +222,20 @@ const (
 // HashSlots represents a list of hash slots.
 type HashSlots []int
 
+// NewHashSlotsFromRange creates a new HashSlots from a range.
+func NewHashSlotsFromRange(begin, end, step int) (slots HashSlots) {
+	for ; begin <= end; begin += step {
+		slots = append(slots, begin)
+	}
+
+	return
+}
+
 func (s HashSlots) String() string {
+	if len(s) == 0 {
+		return ""
+	}
+
 	var parts []string
 	begin := -1
 	last := -1

@@ -16,6 +16,7 @@ type Manager struct {
 	WarningPeriodThreshold time.Duration
 	Logger                 log.Logger
 	Pool                   *Pool
+	MaxSlots               int
 }
 
 // Run the manager on the specified master groups until the context expires.
@@ -61,6 +62,13 @@ func (m *Manager) Run(ctx context.Context, masterGroups []MasterGroup) {
 					if err != nil {
 						errorFeed.Add(err)
 					}
+				case AddSlotsOperation:
+					m.Logger.Log("event", "cluster add slots", "target", operation.Target, "slots", operation.Slots)
+					err = m.ClusterAddSlots(ctx, operation.Target, operation.Slots)
+
+					if err != nil {
+						errorFeed.Add(err)
+					}
 				}
 			}
 		}
@@ -91,7 +99,7 @@ func (m *Manager) BuildDatabase(ctx context.Context, masterGroups []MasterGroup)
 		}
 	}()
 
-	db = &Database{}
+	db = &Database{ManagedSlots: AllSlots}
 	var nodes ClusterNodes
 
 	for _, masterGroup := range masterGroups {
@@ -189,6 +197,49 @@ func (m *Manager) ClusterReplicate(ctx context.Context, redisInstance RedisInsta
 	defer conn.Close()
 
 	_, err = conn.Do("CLUSTER", "REPLICATE", master)
+
+	return
+}
+
+// ClusterAddSlots causes a node to take ownership of the specified slots.
+func (m *Manager) ClusterAddSlots(ctx context.Context, redisInstance RedisInstance, slots HashSlots) (err error) {
+	defer func() {
+		if err != nil {
+			err = fmt.Errorf("asking %s to take ownership of %d slot(s): %s", redisInstance, len(slots), err)
+		}
+	}()
+
+	conn := m.Pool.Get(redisInstance)
+	defer conn.Close()
+
+	for i := 0; i < len(slots); i += m.MaxSlots {
+		up := i + m.MaxSlots
+
+		if up > len(slots) {
+			up = len(slots)
+		}
+
+		args := make([]interface{}, up-i+1)
+		args[0] = "ADDSLOTS"
+
+		for j, slot := range slots[i:up] {
+			args[j+1] = slot
+		}
+
+		err = conn.Send("CLUSTER", args...)
+
+		if err != nil {
+			return
+		}
+	}
+
+	err = conn.Flush()
+
+	if err != nil {
+		return
+	}
+
+	_, err = conn.Receive()
 
 	return
 }

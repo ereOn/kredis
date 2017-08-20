@@ -6,6 +6,12 @@ import (
 	"sort"
 )
 
+// SlotsCount represents the maximum number of slots that can be shared by a cluster.
+const SlotsCount = 16384
+
+// AllSlots represents all the existing Redis cluster slots.
+var AllSlots = NewHashSlotsFromRange(0, SlotsCount-1, 1)
+
 // Database represents a cluster database.
 type Database struct {
 	masterGroups                []MasterGroup
@@ -16,6 +22,8 @@ type Database struct {
 	masters                     []ClusterNodeID
 	slavesByID                  map[ClusterNodeID][]ClusterNodeID
 	connections                 []Connection
+	slotsByID                   map[ClusterNodeID]HashSlots
+	ManagedSlots                HashSlots
 }
 
 // A Connection represents a link from one node to the other.
@@ -75,12 +83,18 @@ func (d *Database) Feed(redisInstance RedisInstance, nodes ClusterNodes) error {
 		d.nodesByID = make(map[ClusterNodeID]ClusterNodes)
 	}
 
+	if d.slotsByID == nil {
+		d.slotsByID = make(map[ClusterNodeID]HashSlots)
+	}
+
 	for _, node := range nodes {
 		if node.ID != selfNode.ID {
 			d.connections = append(d.connections, Connection{
 				From: selfNode.ID,
 				To:   node.ID,
 			})
+		} else {
+			d.slotsByID[selfNode.ID] = selfNode.Slots
 		}
 
 		if node.Flags[FlagMaster] {
@@ -219,6 +233,12 @@ type ReplicateOperation struct {
 	MasterID ClusterNodeID
 }
 
+// AddSlotsOperation adds slots to a given instance.
+type AddSlotsOperation struct {
+	Target RedisInstance
+	Slots  HashSlots
+}
+
 func (d *Database) getExpectedConnections(masterGroup MasterGroup) (connections []Connection) {
 	for i, a := range masterGroup {
 		for j, b := range masterGroup {
@@ -256,6 +276,21 @@ func (d *Database) getMissingConnections(expectedConnections []Connection) (conn
 // GetOperations returns the operations that need to be performed in order for
 // the cluster to meet an acceptable state.
 func (d *Database) GetOperations() (operations []Operation) {
+	if operations = d.GetMeshOperations(); len(operations) != 0 {
+		return
+	}
+
+	if operations = append(operations, d.GetReplicationOperations()...); len(operations) != 0 {
+		return
+	}
+
+	operations = append(operations, d.GetAssignationOperations()...)
+	return
+}
+
+// GetMeshOperations returns the mesh operations that need to be performed for
+// all the members of the cluster to know about each other.
+func (d *Database) GetMeshOperations() (operations []Operation) {
 	// Cluster mesh.
 	var leaderGroup MasterGroup
 
@@ -293,7 +328,14 @@ func (d *Database) GetOperations() (operations []Operation) {
 		}
 	}
 
-	// Master/slave assignations.
+	return
+}
+
+// GetReplicationOperations returns the replication operations that need to be
+// performed for all the members of the cluster to know about their respective
+// roles.
+func (d *Database) GetReplicationOperations() (operations []Operation) {
+	// Master/slave assignations. Only performed once the mesh is established.
 	for _, masterGroup := range d.masterGroups {
 		var masters []RedisInstance
 		var slaves []RedisInstance
@@ -317,16 +359,23 @@ func (d *Database) GetOperations() (operations []Operation) {
 			// More than one master: we need to demote some to slave.
 			var master RedisInstance = masters[0]
 
+			replicators := masters
+
 			for _, slave := range slaves {
 				nodeID := d.GetMasterOf(d.idByRedisInstance[slave])
 
 				if nodeID != "" {
-					master = d.redisInstancesByID[nodeID]
-					break
+					if node, ok := d.redisInstancesByID[nodeID]; ok {
+						master = node
+						break
+					} else {
+						// The slave has an unknown master. We must also reassign him.
+						replicators = append(replicators, slave)
+					}
 				}
 			}
 
-			for _, slave := range masters {
+			for _, slave := range replicators {
 				if slave != master {
 					operations = append(operations, ReplicateOperation{
 						Target:   slave,
@@ -336,6 +385,41 @@ func (d *Database) GetOperations() (operations []Operation) {
 				}
 			}
 		}
+	}
+
+	return
+}
+
+// GetAssignationOperations returns the assignation operations that need to be
+// performed for all the members of the cluster to know which slots they are
+// responsible for.
+func (d *Database) GetAssignationOperations() (operations []Operation) {
+	addSlotsByID := map[ClusterNodeID]HashSlots{}
+	idsBySlot := map[int]ClusterNodeID{}
+
+	for _, nodeID := range d.masters {
+		for _, slot := range d.slotsByID[nodeID] {
+			idsBySlot[slot] = nodeID
+		}
+	}
+
+	for i, slot := range d.ManagedSlots {
+		nodeID := d.masters[i%len(d.masters)]
+
+		if ownerID, ok := idsBySlot[slot]; ok {
+			if ownerID != nodeID {
+				// TODO: Migrate the slot.
+			}
+		} else {
+			addSlotsByID[nodeID] = append(addSlotsByID[nodeID], slot)
+		}
+	}
+
+	for nodeID, slots := range addSlotsByID {
+		operations = append(operations, AddSlotsOperation{
+			Target: d.redisInstancesByID[nodeID],
+			Slots:  slots,
+		})
 	}
 
 	return

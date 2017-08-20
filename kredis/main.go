@@ -73,6 +73,7 @@ var rootCmd = &cobra.Command{
 			Pool:                   pool,
 			SyncPeriod:             time.Second,
 			WarningPeriodThreshold: time.Second * 5,
+			MaxSlots:               100,
 		}
 
 		logger.Log("event", "started")
