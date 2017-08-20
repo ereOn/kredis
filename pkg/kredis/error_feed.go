@@ -4,12 +4,18 @@ import "time"
 
 var timeZero = time.Time{}
 
+// An ErrorItem represents an error.
+type ErrorItem struct {
+	Error error
+	Count int
+}
+
 // ErrorFeed represents an error feed.
 type ErrorFeed struct {
 	Threshold      time.Duration
 	firstErrorTime time.Time
 	timeFunc       func() time.Time
-	errors         []error
+	errors         []ErrorItem
 }
 
 func (f *ErrorFeed) init() {
@@ -24,14 +30,32 @@ func (f *ErrorFeed) Add(err error) {
 
 	if f.firstErrorTime == timeZero {
 		f.firstErrorTime = f.timeFunc()
-		f.errors = []error{err}
+		f.errors = []ErrorItem{
+			ErrorItem{
+				Error: err,
+				Count: 1,
+			},
+		}
 	} else {
-		f.errors = append(f.errors, err)
+		new := true
+		for i, item := range f.errors {
+			if item.Error.Error() == err.Error() {
+				new = false
+				f.errors[i].Count++
+			}
+		}
+
+		if new {
+			f.errors = append(f.errors, ErrorItem{
+				Error: err,
+				Count: 1,
+			})
+		}
 	}
 }
 
 // PopErrors pops the list of errors.
-func (f *ErrorFeed) PopErrors() []error {
+func (f *ErrorFeed) PopErrors() []ErrorItem {
 	f.init()
 
 	now := f.timeFunc()

@@ -115,8 +115,8 @@ func (m *Manager) Run(ctx context.Context, masterGroups []MasterGroup) {
 		} else if errors := errorFeed.PopErrors(); len(errors) != 0 {
 			m.Logger.Log("event", "synchronization errors", "errors-count", len(errors))
 
-			for i, err := range errors {
-				m.Logger.Log("event", "synchronization error", "error-index", i, "error", err)
+			for i, item := range errors {
+				m.Logger.Log("event", "synchronization error", "error-index", i, "error", item.Error, "count", item.Count)
 			}
 		}
 
