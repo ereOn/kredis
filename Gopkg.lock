@@ -39,6 +39,12 @@
 
 [[projects]]
   branch = "master"
+  name = "github.com/mna/redisc"
+  packages = ["."]
+  revision = "e2988ff81a60b52a241d29891b350e3f2778d847"
+
+[[projects]]
+  branch = "master"
   name = "github.com/spf13/cobra"
   packages = ["."]
   revision = "b26b538f693051ac6518e65672de3144ce3fbedc"
@@ -52,6 +58,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "155c4c293717612d0c15544bdafee243da3ee0b76ea2e17659de76877781c0b6"
+  inputs-digest = "c3796c6d829b1be53116ab50b128ec589042b8873f95361bf7380963d29fea04"
   solver-name = "gps-cdcl"
   solver-version = 1
