@@ -4,4 +4,4 @@ all: build
 .PHONY: build
 build:
 	helm lint
-	helm package .
+	helm package . --destination ../../dist/charts/

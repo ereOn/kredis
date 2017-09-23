@@ -8,6 +8,8 @@ build:
 
 .PHONY: dist-build
 dist-build:
+	@mkdir -p dist/bin
+	@mkdir -p dist/charts
 	make -C kredis dist-build
 	make -C images build
 	make -C charts build
