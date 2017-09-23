@@ -8,18 +8,20 @@ all: build dist-build
 build:
 	make -C pkg/kredis build
 	make -C kredis build
+	make -C kredis-test build
 
 .PHONY: dist-build
 dist-build:
 	@mkdir -p dist/bin
 	@mkdir -p dist/charts
 	make -C kredis dist-build
+	make -C kredis-test dist-build
 	make -C images build
 	make -C charts build
 
 .PHONY: test
 test:
-	helm upgrade test dist/charts/redis-cluster-*.tgz --install --set shards=$(KREDIS_SHARDS) --set instances=$(KREDIS_INSTANCES)
+	helm upgrade test dist/charts/redis-cluster-*.tgz --install --set shards=$(KREDIS_SHARDS) --set instances=$(KREDIS_INSTANCES) --set test=true
 
 .PHONY: push
 push:

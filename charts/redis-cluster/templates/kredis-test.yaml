@@ -1,0 +1,22 @@
+{{ if and $.Values.test $.Values.shards $.Values.instances }}
+apiVersion: apps/v1beta1
+kind: Deployment
+metadata:
+  labels:
+    app: kredis-test
+  name: {{ $.Release.Name }}-kredis-test
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: kredis-test
+    spec:
+      containers:
+      - name: kredis-test
+        imagePullPolicy: IfNotPresent
+        image: ereon/kredis-test
+        args:
+        - {{ $.Release.Name }}-redis-0.{{ $.Release.Name }}-redis:6379
+{{ end }}
+
