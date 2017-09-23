@@ -545,11 +545,11 @@ b 1:1@1 master,myself - 0 0 0 connected
 	expected := []Operation{
 		AddSlotsOperation{
 			Target: riA,
-			Slots:  NewHashSlotsFromRange(0, SlotsCount-1, 2),
+			Slots:  NewHashSlotsFromRange(0, SlotsCount/2-1, 1),
 		},
 		AddSlotsOperation{
 			Target: riB,
-			Slots:  NewHashSlotsFromRange(1, SlotsCount-1, 2),
+			Slots:  NewHashSlotsFromRange(SlotsCount/2, SlotsCount-1, 1),
 		},
 	}
 
@@ -563,22 +563,22 @@ func TestDatabaseGetOperationsAssignationPreAssigned(t *testing.T) {
 	database.RegisterGroup(MasterGroup{riA})
 	database.RegisterGroup(MasterGroup{riB})
 	database.Feed(riA, mustParseClusterNodes(`
-a 1:1@1 master,myself - 0 0 0 connected 0 2 4
-b 1:1@1 master - 0 0 0 connected 1 3 5
+a 1:1@1 master,myself - 0 0 0 connected 0-2
+b 1:1@1 master - 0 0 0 connected 5-7
 `))
 	database.Feed(riB, mustParseClusterNodes(`
-a 1:1@1 master - 0 0 0 connected 0 2 4
-b 1:1@1 master,myself - 0 0 0 connected 1 3 5
+a 1:1@1 master - 0 0 0 connected 0-2
+b 1:1@1 master,myself - 0 0 0 connected 5-7
 `))
 	operations := database.GetOperations()
 	expected := []Operation{
 		AddSlotsOperation{
 			Target: riA,
-			Slots:  NewHashSlotsFromRange(6, 10, 2),
+			Slots:  NewHashSlotsFromRange(3, 4, 1),
 		},
 		AddSlotsOperation{
 			Target: riB,
-			Slots:  NewHashSlotsFromRange(7, 10, 2),
+			Slots:  NewHashSlotsFromRange(8, 10, 1),
 		},
 	}
 

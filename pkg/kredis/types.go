@@ -275,17 +275,33 @@ func ParseHashSlots(s string) (slots HashSlots, err error) {
 	parts := strings.Split(s, "-")
 
 	switch len(parts) {
-	case 1, 2:
+	case 1:
 		var slot int
 
-		for _, part := range parts {
-			slot, err = strconv.Atoi(part)
+		slot, err = strconv.Atoi(parts[0])
 
-			if err != nil {
-				err = fmt.Errorf("parsing \"%s\": %s", s, err)
-				return
-			}
+		if err != nil {
+			err = fmt.Errorf("parsing \"%s\": %s", s, err)
+			return
+		}
 
+		slots = append(slots, slot)
+
+		return
+	case 2:
+		var begin, end int
+
+		if begin, err = strconv.Atoi(parts[0]); err != nil {
+			err = fmt.Errorf("parsing \"%s\": %s", s, err)
+			return
+		}
+
+		if end, err = strconv.Atoi(parts[1]); err != nil {
+			err = fmt.Errorf("parsing \"%s\": %s", s, err)
+			return
+		}
+
+		for slot := begin; slot <= end; slot++ {
 			slots = append(slots, slot)
 		}
 

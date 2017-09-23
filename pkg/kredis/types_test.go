@@ -483,7 +483,7 @@ func TestHashSlotsString(t *testing.T) {
 	expected := "4-17"
 
 	if expected != value {
-		t.Errorf("expected: \"%s\", ngot\"%s\"", expected, value)
+		t.Errorf("expected:\n\"%s\"\ngot:\n\"%s\"", expected, value)
 	}
 }
 
@@ -493,7 +493,7 @@ func TestHashSlotsStringInterval(t *testing.T) {
 	expected := "4 7 10 13 16"
 
 	if expected != value {
-		t.Errorf("expected: \"%s\", ngot\"%s\"", expected, value)
+		t.Errorf("expected:\n\"%s\"\ngot:\n\"%s\"", expected, value)
 	}
 }
 
@@ -503,6 +503,72 @@ func TestHashSlotsStringEmpty(t *testing.T) {
 	expected := ""
 
 	if expected != value {
-		t.Errorf("expected: \"%s\", ngot\"%s\"", expected, value)
+		t.Errorf("expected:\n\"%s\"\ngot:\n\"%s\"", expected, value)
+	}
+}
+
+func TestParseHashSlots(t *testing.T) {
+	reference := "2"
+	value, err := ParseHashSlots(reference)
+
+	if err != nil {
+		t.Errorf("expected no error but got: %s", err)
+	}
+
+	expected := NewHashSlotsFromRange(2, 2, 1)
+
+	if !reflect.DeepEqual(expected, value) {
+		t.Errorf("expected:\n\"%s\"\ngot:\n\"%s\"", expected, value)
+	}
+}
+
+func TestParseHashSlotsRange(t *testing.T) {
+	reference := "2-5"
+	value, err := ParseHashSlots(reference)
+
+	if err != nil {
+		t.Errorf("expected no error but got: %s", err)
+	}
+
+	expected := NewHashSlotsFromRange(2, 5, 1)
+
+	if !reflect.DeepEqual(expected, value) {
+		t.Errorf("expected:\n\"%s\"\ngot:\n\"%s\"", expected, value)
+	}
+}
+
+func TestParseHashSlotsErrorEmpty(t *testing.T) {
+	reference := ""
+	_, err := ParseHashSlots(reference)
+
+	if err == nil {
+		t.Error("expected an error")
+	}
+}
+
+func TestParseHashSlotsErrorTooManyParts(t *testing.T) {
+	reference := "2-5-6"
+	_, err := ParseHashSlots(reference)
+
+	if err == nil {
+		t.Error("expected an error")
+	}
+}
+
+func TestParseHashSlotsErrorInvalidFirstPart(t *testing.T) {
+	reference := "a-4"
+	_, err := ParseHashSlots(reference)
+
+	if err == nil {
+		t.Error("expected an error")
+	}
+}
+
+func TestParseHashSlotsErrorInvalidSecondPart(t *testing.T) {
+	reference := "4-a"
+	_, err := ParseHashSlots(reference)
+
+	if err == nil {
+		t.Error("expected an error")
 	}
 }

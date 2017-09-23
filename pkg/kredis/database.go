@@ -404,7 +404,7 @@ func (d *Database) GetAssignationOperations() (operations []Operation) {
 	}
 
 	for i, slot := range d.ManagedSlots {
-		nodeID := d.masters[i%len(d.masters)]
+		nodeID := d.masters[(i*len(d.masters))/len(d.ManagedSlots)]
 
 		if ownerID, ok := idsBySlot[slot]; ok {
 			if ownerID != nodeID {
