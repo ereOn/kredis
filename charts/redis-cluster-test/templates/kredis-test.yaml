@@ -1,4 +1,3 @@
-{{ if and $.Values.test $.Values.shards $.Values.instances }}
 apiVersion: apps/v1beta1
 kind: Deployment
 metadata:
@@ -17,6 +16,6 @@ spec:
         imagePullPolicy: IfNotPresent
         image: ereon/kredis-test
         args:
-        - {{ $.Release.Name }}-redis-0.{{ $.Release.Name }}-redis:6379
-{{ end }}
-
+        {{ range $redisHost := $.Values.redisHosts }}
+        - {{ $redisHost }}
+        {{ end }}

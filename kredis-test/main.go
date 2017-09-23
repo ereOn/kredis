@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -56,27 +57,27 @@ func createPool(addr string, opts ...redis.DialOption) (*redis.Pool, error) {
 }
 
 var rootCmd = &cobra.Command{
-	Use:   "kredis-test redis-host",
+	Use:   "kredis-test redis-host...",
 	Short: "A tool to test kredis clusters.",
 	RunE: func(cmd *cobra.Command, args []string) (err error) {
 		if len(args) != 1 {
 			return errors.New("unexpected number of arguments")
 		}
 
-		redisHost := args[0]
+		redisHosts := args
 
 		cmd.SilenceUsage = true
 
 		logger := log.NewLogfmtLogger(log.NewSyncWriter(os.Stderr))
 
-		logger.Log("event", "test starting", "redis-host", redisHost)
+		logger.Log("event", "test starting", "redis-hosts", strings.Join(redisHosts, ","))
 		defer logger.Log("event", "test stopping")
 
 		ctx, cancel := WithCancelOnInterupt(context.Background())
 		defer cancel()
 
 		cluster := &redisc.Cluster{
-			StartupNodes: []string{redisHost},
+			StartupNodes: redisHosts,
 			DialOptions:  []redis.DialOption{redis.DialConnectTimeout(5 * time.Second)},
 			CreatePool:   createPool,
 		}

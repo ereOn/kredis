@@ -1,3 +1,4 @@
+VERSION=0.0.1
 KREDIS_SHARDS:=3
 KREDIS_INSTANCES:=3
 
@@ -19,9 +20,13 @@ dist-build:
 	make -C images build
 	make -C charts build
 
+.PHONY: deploy
+deploy:
+	helm upgrade deploy dist/charts/redis-cluster-$(VERSION).tgz --install --set shards=$(KREDIS_SHARDS) --set instances=$(KREDIS_INSTANCES)
+
 .PHONY: test
 test:
-	helm upgrade test dist/charts/redis-cluster-*.tgz --install --set shards=$(KREDIS_SHARDS) --set instances=$(KREDIS_INSTANCES) --set test=true
+	helm upgrade test dist/charts/redis-cluster-test-$(VERSION).tgz --install
 
 .PHONY: push
 push:
