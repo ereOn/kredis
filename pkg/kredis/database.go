@@ -239,6 +239,15 @@ type AddSlotsOperation struct {
 	Slots  HashSlots
 }
 
+// MigrateSlotOperation adds slots to a given instance.
+type MigrateSlotOperation struct {
+	Source        RedisInstance
+	SourceID      ClusterNodeID
+	Destination   RedisInstance
+	DestinationID ClusterNodeID
+	Slot          int
+}
+
 func (d *Database) getExpectedConnections(masterGroup MasterGroup) (connections []Connection) {
 	for i, a := range masterGroup {
 		for j, b := range masterGroup {
@@ -408,7 +417,13 @@ func (d *Database) GetAssignationOperations() (operations []Operation) {
 
 		if ownerID, ok := idsBySlot[slot]; ok {
 			if ownerID != nodeID {
-				// TODO: Migrate the slot.
+				operations = append(operations, MigrateSlotOperation{
+					Source:        d.redisInstancesByID[ownerID],
+					SourceID:      ownerID,
+					Destination:   d.redisInstancesByID[nodeID],
+					DestinationID: nodeID,
+					Slot:          slot,
+				})
 			}
 		} else {
 			addSlotsByID[nodeID] = append(addSlotsByID[nodeID], slot)

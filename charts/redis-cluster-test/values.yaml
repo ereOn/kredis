@@ -1,2 +1,2 @@
 redisHosts:
-- test-redis-0.test-redis:6379
+- deploy-redis-0.deploy-redis:6379

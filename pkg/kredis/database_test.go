@@ -563,18 +563,25 @@ func TestDatabaseGetOperationsAssignationPreAssigned(t *testing.T) {
 	database.RegisterGroup(MasterGroup{riA})
 	database.RegisterGroup(MasterGroup{riB})
 	database.Feed(riA, mustParseClusterNodes(`
-a 1:1@1 master,myself - 0 0 0 connected 0-2
-b 1:1@1 master - 0 0 0 connected 5-7
+a 1:1@1 master,myself - 0 0 0 connected 1-2
+b 1:1@1 master - 0 0 0 connected 0 6-7
 `))
 	database.Feed(riB, mustParseClusterNodes(`
-a 1:1@1 master - 0 0 0 connected 0-2
-b 1:1@1 master,myself - 0 0 0 connected 5-7
+a 1:1@1 master - 0 0 0 connected 1-2
+b 1:1@1 master,myself - 0 0 0 connected 0 6-7
 `))
 	operations := database.GetOperations()
 	expected := []Operation{
+		MigrateSlotOperation{
+			Source:        riB,
+			SourceID:      "b",
+			Destination:   riA,
+			DestinationID: "a",
+			Slot:          0,
+		},
 		AddSlotsOperation{
 			Target: riA,
-			Slots:  NewHashSlotsFromRange(3, 4, 1),
+			Slots:  NewHashSlotsFromRange(3, 5, 1),
 		},
 		AddSlotsOperation{
 			Target: riB,

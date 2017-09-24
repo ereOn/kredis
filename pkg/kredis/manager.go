@@ -6,6 +6,7 @@ import (
 	"net"
 	"time"
 
+	"github.com/garyburd/redigo/redis"
 	"github.com/go-kit/kit/log"
 )
 
@@ -99,6 +100,14 @@ func (m *Manager) Run(ctx context.Context, masterGroups []MasterGroup) {
 						m.setState(ManagerStateAssignation)
 						m.Logger.Log("event", "cluster add slots", "target", operation.Target, "slots", operation.Slots)
 						err = m.ClusterAddSlots(ctx, operation.Target, operation.Slots)
+
+						if err != nil {
+							errorFeed.Add(err)
+						}
+					case MigrateSlotOperation:
+						m.setState(ManagerStateAssignation)
+						m.Logger.Log("event", "cluster migrate slot", "source", operation.Source, "destination", operation.Destination, "slot", operation.Slot)
+						err = m.ClusterMigrateSlots(ctx, operation.Source, operation.SourceID, operation.Destination, operation.DestinationID, HashSlots{operation.Slot})
 
 						if err != nil {
 							errorFeed.Add(err)
@@ -277,6 +286,69 @@ func (m *Manager) ClusterAddSlots(ctx context.Context, redisInstance RedisInstan
 	}
 
 	_, err = conn.Receive()
+
+	return
+}
+
+// ClusterMigrateSlots causes slots to migrate from one cluster node to another.
+func (m *Manager) ClusterMigrateSlots(ctx context.Context, source RedisInstance, sourceID ClusterNodeID, destination RedisInstance, destinationID ClusterNodeID, slots HashSlots) (err error) {
+	keysBatchSize := 10000
+	keysCopyTimeout := time.Second * 30
+
+	defer func() {
+		if err != nil {
+			err = fmt.Errorf("migrating slots %s from %s to %s: %s", slots, source, destination, err)
+		}
+	}()
+
+	sourceConn := m.Pool.Get(source)
+	defer sourceConn.Close()
+	destConn := m.Pool.Get(destination)
+	defer destConn.Close()
+
+	for _, slot := range slots {
+		if _, err = destConn.Do("CLUSTER", "SETSLOT", slot, "IMPORTING", sourceID); err != nil {
+			return
+		}
+
+		if _, err = sourceConn.Do("CLUSTER", "SETSLOT", slot, "MIGRATING", destinationID); err != nil {
+			destConn.Do("CLUSTER", "SETSLOT", slot, "STABLE")
+			return
+		}
+
+		var keys []string
+
+		for {
+			keys, err = redis.Strings(sourceConn.Do("CLUSTER", "GETKEYSINSLOT", slot, keysBatchSize))
+
+			if err != nil {
+				destConn.Do("CLUSTER", "SETSLOT", slot, "STABLE")
+				sourceConn.Do("CLUSTER", "SETSLOT", slot, "STABLE")
+				return
+			}
+
+			if len(keys) == 0 {
+				break
+			}
+
+			args := []interface{}{
+				destination.Hostname, destination.Port, "", 0, int(keysCopyTimeout.Seconds()), "REPLACE", "KEYS",
+			}
+
+			for _, key := range keys {
+				args = append(args, key)
+			}
+
+			if _, err = sourceConn.Do("MIGRATE", args...); err != nil {
+				destConn.Do("CLUSTER", "SETSLOT", slot, "STABLE")
+				sourceConn.Do("CLUSTER", "SETSLOT", slot, "STABLE")
+				return
+			}
+		}
+
+		destConn.Do("CLUSTER", "SETSLOT", slot, "NODE", destinationID)
+		sourceConn.Do("CLUSTER", "SETSLOT", slot, "NODE", destinationID)
+	}
 
 	return
 }
